@@ -194,26 +194,26 @@ except ValueError as e:
 print("\n=== F-04: evaluator hard-block predicate vs production rule ===")
 import re  # noqa: E402
 
+# Long-term fix: the rule lives in ONE place (pipeline.l1_hard_block) and the
+# evaluators call it. Verify the truth table on the real function, and that
+# both evaluators use the shared helper without the legacy shortcut.
+truth = [(0.87, 1, 1, False), (0.97, 1, 1, True), (0.87, 5, 2, True),
+         (0.87, 5, 1, False), (0.90, 1, 0, False)]
+table_ok = True
+for p1, nch, nal, expected in truth:
+    got = P.l1_hard_block(p1, nch, nal, 0.85)
+    print(f"p1={p1:.2f} chunks={nch} alert={nal}: "
+          f"l1_hard_block={got} expected={expected}")
+    table_ok &= (got == expected)
+
 src = open(f"{REPO}/evaluate_end_to_end.py", encoding="utf-8").read()
-canonical = re.search(
-    r"unambiguous\s*=\s*\(p1\s*>=\s*0\.95\)\s*or\s*\(n_ch\s*>\s*1\s+and\s+"
-    r"n_al\s*>=\s*2\)", src)
+uses_shared = "l1_hard_block" in src
 legacy = re.search(r"hard\[i\][^\n]*n_ch\s*==\s*1", src)
-print(f"canonical production predicate present: {bool(canonical)}")
+print(f"evaluator calls shared l1_hard_block: {uses_shared}")
 print(f"legacy single-chunk shortcut in hard[]: {bool(legacy)}")
 
-
-def prod_hard(p1, n_ch, n_al, block=0.85):   # pipeline.py run() rule
-    unambiguous = (p1 >= 0.95) or (n_ch > 1 and n_al >= 2)
-    return p1 >= block and unambiguous
-
-
-for p1, nch, nal in [(0.87, 1, 1), (0.97, 1, 1), (0.87, 5, 2), (0.87, 5, 1),
-                     (0.90, 1, 0)]:
-    print(f"p1={p1:.2f} chunks={nch} alert={nal}: production_hard={prod_hard(p1, nch, nal)}")
-
-if canonical and not legacy:
-    print("VERDICT: FIXED — evaluator now mirrors the production rule")
+if table_ok and uses_shared and not legacy:
+    print("VERDICT: FIXED — single shared predicate, drift class eliminated")
 else:
     failures.append("F-04 evaluator predicate still diverges")
     print("VERDICT: NOT FIXED")

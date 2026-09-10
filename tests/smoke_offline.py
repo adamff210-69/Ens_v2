@@ -768,54 +768,54 @@ class TestAuditSecurityFixes(unittest.TestCase):
             self.assertIn("Probe fingerprint conflict", str(ctx.exception))
 
     def test_f04_evaluator_predicate_matches_production(self):
-        """F-04: evaluate_end_to_end.py must use the production dual-key rule.
+        """F-04: one shared predicate for serving and evaluation.
 
-        The evaluator module imports `datasets` at module top, which is not
-        installable in the offline smoke environment, so parity is asserted on
-        the source itself: the canonical production predicate must be present
-        and the legacy single-chunk shortcut must be gone from the hard rule.
+        Long-term fix (reviewer-approved): the L1 hard-block rule exists in
+        exactly one place — pipeline.l1_unambiguous/l1_hard_block — called by
+        run(), evaluate_end_to_end.py and benchmark.py. The truth table below
+        exercises the REAL function; the source checks assert the evaluators
+        actually call it instead of re-implementing the rule.
         """
         import re
-        root = Path(__file__).resolve().parent.parent
 
-        # Truth table of the mirrored production rule, incl. the two cases
-        # that diverged pre-fix (0.87/1ch and 0.90/1ch). Runs everywhere.
-        def prod_hard(p1, n_ch, n_al, block=0.85):
-            unambiguous = (p1 >= 0.95) or (n_ch > 1 and n_al >= 2)
-            return p1 >= block and unambiguous
-
+        # Truth table against the real shared functions, incl. the two cases
+        # that diverged pre-fix (0.87/1ch and 0.90/1ch).
         cases = [
-            (0.87, 1, 1, False),   # single-chunk ambiguous band: defer, no hard block
+            # p1, chunks, alerts, hard-blocked at threshold 0.85?
+            (0.87, 1, 1, False),   # single-chunk ambiguous band: defer to L2
             (0.97, 1, 1, True),
             (0.87, 5, 2, True),
             (0.87, 5, 1, False),
             (0.90, 1, 0, False),   # second pre-fix divergence
             (0.85, 1, 1, False),
-            (0.95, 1, 0, True),
+            (0.95, 1, 0, True),    # extreme peak is unambiguous
+            (0.84, 5, 5, False),   # below block threshold entirely
         ]
         for p1, nch, nal, expected in cases:
             self.assertEqual(
-                prod_hard(p1, nch, nal), expected,
-                f"production rule mirror failed for p1={p1}, chunks={nch}, "
-                f"alerts={nal}")
+                P.l1_hard_block(p1, nch, nal, 0.85), expected,
+                f"l1_hard_block failed for p1={p1}, chunks={nch}, alerts={nal}")
+            # consistency: hard-block == threshold AND unambiguous
+            self.assertEqual(
+                P.l1_hard_block(p1, nch, nal, 0.85),
+                p1 >= 0.85 and P.l1_unambiguous(p1, nch, nal))
 
-        # Source parity with the evaluator. Only possible in a full repo
-        # checkout: verify.py's extracted bundle ships 4 files and does not
-        # include evaluate_end_to_end.py, so skip there (the evaluator runs
-        # on Kaggle from the git checkout anyway).
-        src_path = root / "evaluate_end_to_end.py"
-        if not src_path.exists():
-            self.skipTest("evaluate_end_to_end.py not present "
-                          "(extracted verify.py bundle)")
-        src = src_path.read_text(encoding="utf-8")
+        # Threshold parameter is honored (custom l1_block).
+        self.assertFalse(P.l1_hard_block(0.87, 1, 1, 0.90))
+        self.assertTrue(P.l1_hard_block(0.97, 1, 1, 0.90))
 
-        # Canonical production predicate (pipeline.py run(): unambiguous = ...)
-        self.assertRegex(
-            src,
-            r"unambiguous\s*=\s*\(p1\s*>=\s*0\.95\)\s*or\s*"
-            r"\(n_ch\s*>\s*1\s+and\s+n_al\s*>=\s*2\)")
-        # The legacy shortcut that caused F-04 must not assign hard[] anymore.
-        self.assertNotRegex(src, r"hard\[i\][^\n]*n_ch\s*==\s*1")
+        # Both evaluators must use the shared helper, not a local copy.
+        root = Path(__file__).resolve().parent.parent
+        for fname in ("evaluate_end_to_end.py", "benchmark.py"):
+            fpath = root / fname
+            if not fpath.exists():
+                self.skipTest(f"{fname} not present (extracted bundle)")
+            src = fpath.read_text(encoding="utf-8")
+            self.assertIn("l1_hard_block", src,
+                          f"{fname} must call the shared predicate")
+            self.assertNotRegex(
+                src, r"hard\[i\][^\n]*n_ch\s*==\s*1",
+                f"{fname} still contains the legacy F-04 shortcut")
 
     def test_f05_benchmark_has_no_phantom_dual_key_config(self):
         """F-05: benchmark.py must not report dual-key as a distinct policy.

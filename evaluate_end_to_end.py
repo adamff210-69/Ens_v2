@@ -34,7 +34,7 @@ import csv
 import numpy as np
 from datasets import load_dataset
 
-from pipeline import InjectionDetectionPipeline, VRAMManager
+from pipeline import InjectionDetectionPipeline, VRAMManager, l1_hard_block
 
 
 def main() -> None:
@@ -93,12 +93,10 @@ def main() -> None:
         _, p1, meta = pipe.layer1.score(text)
         p1s[i] = p1
         n_ch, n_al = meta["total_chunks"], meta["alert_chunks_count"]
-        # Mirror the production dual-key rule exactly (pipeline.py run():
-        # unambiguous = (p1 >= 0.95) or (multi and alert_chunks >= 2)).
-        # The previous shortcut 'n_ch == 1' counted single-chunk ambiguous-band
-        # rows as hard L1 blocks, while production defers them to L2 (F-04).
-        unambiguous = (p1 >= 0.95) or (n_ch > 1 and n_al >= 2)
-        hard[i] = (p1 >= args.l1_block) and unambiguous
+        # Production dual-key hard-block rule, shared with pipeline.run() via
+        # pipeline.l1_hard_block (audit F-04: the evaluator previously had its
+        # own divergent predicate, 'n_ch == 1 or n_al >= 2 or p1 >= 0.95').
+        hard[i] = l1_hard_block(p1, n_ch, n_al, args.l1_block)
 
         # ---- Layer 2 on everything L1 did not already block -------------
         if not hard[i]:

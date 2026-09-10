@@ -35,7 +35,8 @@ import csv
 import numpy as np
 from datasets import load_dataset
 
-from pipeline import InjectionDetectionPipeline, VRAMManager
+from pipeline import (InjectionDetectionPipeline, VRAMManager,
+                      l1_hard_block)
 
 
 # --------------------------------------------------------------------------
@@ -188,10 +189,10 @@ def main() -> None:
         for i, text in enumerate(texts):
             _, s1, meta = pipe.layer1.score(text)
             p1[i] = s1
-            multi = meta["total_chunks"] > 1
-            n_alert = meta["alert_chunks_count"]
-            unambiguous = (s1 >= 0.95) or (multi and n_alert >= 2)
-            hard[i] = s1 >= args.l1_block and unambiguous
+            # Production hard-block predicate, shared with pipeline.run()
+            # and evaluate_end_to_end.py (audit F-04 long-term fix).
+            hard[i] = l1_hard_block(s1, meta["total_chunks"],
+                                    meta["alert_chunks_count"], args.l1_block)
             if not hard[i]:
                 _, p2[i] = pipe.layer2.score(text)
             if (i + 1) % 25 == 0:

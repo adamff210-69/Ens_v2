@@ -1,5 +1,14 @@
 # PATCH_PLAN.md — Prioritized minimal fixes
 
+> **Status 2026-09-10 (F-04 long-term hardening):** per reviewer sign-off on
+> P1, the F-04 fix was strengthened from source-parity to a shared predicate:
+> `pipeline.l1_unambiguous()` / `pipeline.l1_hard_block()` are now the single
+> source of truth for the L1 hard-block rule, called by `run()`,
+> `evaluate_end_to_end.py` and `benchmark.py`. The regression test exercises
+> the real functions (truth table + threshold honoring) and only asserts
+> source usage of the helper as a drift alarm. The predicate-drift class is
+> eliminated, not just patched.
+>
 > **Status 2026-09-10 (Batch A):** Fixes 5, 6, 7 (F-12) and 10 (F-11) also
 > IMPLEMENTED and regression-locked: `benchmark.py` no longer emits the
 > phantom dual-key row (docstring updated to match), the `train()` docstring

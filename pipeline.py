@@ -1016,6 +1016,30 @@ class OutputCheckLayer:
 
 
 # ---------------------------------------------------------------------------
+# Shared L1 decision predicates (audit F-04, long-term fix)
+# ---------------------------------------------------------------------------
+# Single source of truth for the L1 hard-block rule. Production run(),
+# evaluate_end_to_end.py and benchmark.py all call these — a predicate that
+# exists in exactly one place cannot drift between serving and evaluation.
+def l1_unambiguous(l1_prob: float, total_chunks: int,
+                   alert_chunks: int) -> bool:
+    """True when an L1 verdict is decisive under the dual-key policy.
+
+    Decisive means: an extreme single-window peak (>= 0.95), or a long
+    document with at least two alert windows (one quoted attack inside a
+    long benign document is ambiguous, not decisive).
+    """
+    return (l1_prob >= 0.95) or (total_chunks > 1 and alert_chunks >= 2)
+
+
+def l1_hard_block(l1_prob: float, total_chunks: int, alert_chunks: int,
+                  block_threshold: float = 0.85) -> bool:
+    """L1 hard-block decision: at/above threshold AND unambiguous."""
+    return (l1_prob >= block_threshold
+            and l1_unambiguous(l1_prob, total_chunks, alert_chunks))
+
+
+# ---------------------------------------------------------------------------
 # Configuration validation (audit finding F-12)
 # ---------------------------------------------------------------------------
 def _validate_thresholds(
@@ -1204,15 +1228,17 @@ class InjectionDetectionPipeline:
             result.layer_scores["layer1"] = (l1_label, round(l1_prob, 4))
             result.metadata["layer1_details"] = l1_meta
 
-            is_long_doc = l1_meta["total_chunks"] > 1
-            # Three-way L1 verdict:
+            # Three-way L1 verdict (hard-block predicate shared with the
+            # evaluators via l1_unambiguous/l1_hard_block, audit F-04):
             #   BLOCK   - unambiguous: extreme peak, or >=2 alert windows
             #   CONFIRM - ambiguous band >= block_thr but below 0.95 on a
             #             single window -> defer to L2 (dual-key)
             #   PASS    - below block threshold
-            multi = is_long_doc
-            unambiguous = (l1_prob >= 0.95) or (multi and l1_meta["alert_chunks_count"] >= 2)
-            if l1_prob >= self.l1_block_threshold and unambiguous:
+            unambiguous = l1_unambiguous(l1_prob, l1_meta["total_chunks"],
+                                         l1_meta["alert_chunks_count"])
+            if l1_hard_block(l1_prob, l1_meta["total_chunks"],
+                             l1_meta["alert_chunks_count"],
+                             self.l1_block_threshold):
                 result.blocked = True
                 result.reason = (
                     f"Layer 1 classification block (Peak Score: {l1_prob:.4f}, "
