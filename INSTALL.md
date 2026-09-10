@@ -1,65 +1,49 @@
 # Getting the files onto Kaggle
 
-The pipeline files live in the Arena workspace, **not** on your Kaggle box. A
+The pipeline files live in this Git repository, **not** on your Kaggle box. A
 fresh Kaggle session starts with an empty `/kaggle/working`, so
-`python3 train_probe.py` fails with `No such file or directory`. Pick one route
-below — route A is the fastest.
+`python3 train_probe.py` fails with `No such file or directory`. Pick one
+route below — route A is the fastest and the only one that stays reproducible.
+
+> **Why not paste links?** Earlier versions of this doc shipped the files via
+> anonymous `paste.rs` URLs. Don't do that: paste links expire (your notebook
+> becomes unreproducible within weeks), the code is mutable and unattributed,
+> and checksums printed by a downloaded script verify only *its own* embedded
+> copies — circular trust. Everything below fetches from the pinned Git repo
+> or from files you uploaded yourself.
 
 ---
 
-## Route A — one cell, no upload (recommended)
+## Route A — git clone at a pinned commit (recommended)
 
-`verify.py` is hosted at a temporary public link. Requires **Internet: ON** in
-the notebook (right sidebar -> Settings -> Internet).
+Requires **Internet: ON** in the notebook (right sidebar -> Settings ->
+Internet). Pin the commit SHA so a future you (or a reviewer) gets exactly
+the audited code:
 
     %cd /kaggle/working
-    !curl -sSL -o verify.py https://paste.rs/aljgi
-    !sha256sum verify.py
-
-`sha256sum` must print
-`fef18afa029211e35746bbb669277ab57d961a16cbab0e0ad5893170aeeb0b15`. Then:
-
+    !git clone https://github.com/adamff210-69/Ens_v2.git
+    %cd Ens_v2
+    !git checkout 5ac5e4399a433ac5513f4df56544d71aca2396f4   # audited artifact
     !python verify.py
 
-Which extracts the four files, verifies their hashes, runs the 26-test offline
-suite, and prints the training commands.
+Which extracts the four runtime files, verifies each against a pinned
+SHA-256, runs the 33-test offline suite, and prints the training commands.
 
-If `curl` is blocked or returns an empty file, use Python's own HTTP client:
+If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 
-    import urllib.request
-    urllib.request.urlretrieve("https://paste.rs/aljgi", "/kaggle/working/verify.py")
-
-If both fail, Kaggle's proxy is blocking the host - fall back to Route B.
-
-## Route A2 — patch only the test file (no internet needed)
-
-If the four files are already installed and verified (they were), only
-`tests/smoke_offline.py` needs fixing. One cell:
-
-    p = "/kaggle/working/tests/smoke_offline.py"
-    s = open(p).read()
-    start = s.index("    def test_cpu_fallback(self):")
-    end = s.index("    def test_turing_is_fp16(self):")
-    ...
-
-(full cell: `patch_test_cpu_fallback.py`, also hosted at
-https://paste.rs/RWoOo, then run `!python tests/smoke_offline.py`)
-
-Why: `test_cpu_fallback` asserted a float32 dtype while *assuming* the host had
-no GPU. Kaggle sessions with the accelerator ON have CUDA, so `t4_dtype()`
-correctly returned fp16 and the assertion failed. The test now mocks a CPU host
-instead of assuming one, and a companion `test_gpu_host_reports_its_own_dtype`
-covers the GPU case.
-
-## Route B — download `verify.py`, upload it, run it
+## Route B — download `verify.py` from GitHub, upload it, run it
 
 `verify.py` is a single stdlib-only file with every source file embedded
-(base64 + SHA-256 pinned). No pip, no network, no git.
+(gzip + base85, SHA-256 pinned per file). No pip, no network, no git.
+Because it is fetched from the pinned repository — not an anonymous paste —
+you can audit it before uploading.
 
-1. Download **`verify.py`** (138 KB) from this workspace.
-2. Kaggle notebook → right sidebar → **Data → Upload** → drop it in (it becomes
-   `/kaggle/input/<your-dataset>/verify.py`), *or* use the notebook's own file
-   upload widget which lands it in `/kaggle/working`.
+1. Download **`verify.py`** (~51 KB) from the repo at the pinned commit:
+   `https://github.com/adamff210-69/Ens_v2/blob/<commit>/verify.py`
+   (raw link -> right-click -> Save), or `git clone` locally first.
+2. Kaggle notebook → right sidebar → **Data → Upload** → drop it in (it
+   becomes `/kaggle/input/<your-dataset>/verify.py`), *or* use the
+   notebook's own file upload widget which lands it in `/kaggle/working`.
 3. Run one cell:
 
 ```python
@@ -73,10 +57,10 @@ Expected output:
 
 ```
 extracting 4 files into /kaggle/working
-  [OK ] pipeline.py                   54537 bytes  sha256 1b6e9200b85e3095
-  [OK ] train_probe.py                 9580 bytes  sha256 6a5d5225fcde4cd7
-  [OK ] benchmark.py                  10370 bytes  sha256 d60b8a4bd1246830
-  [OK ] tests/smoke_offline.py         9580 bytes  sha256 e2672aa4822784ba
+  [OK ] pipeline.py                  58647 bytes  sha256 fcbf59e606266d1a
+  [OK ] train_probe.py               14109 bytes  sha256 f7b8622edf6147a4
+  [OK ] benchmark.py                 10551 bytes  sha256 10672b7dd26b9b14
+  [OK ] tests/smoke_offline.py       25927 bytes  sha256 0d405a7a5ee401a3
 all checksums match
 running offline test suite...
 smoke suite PASSED
@@ -88,36 +72,34 @@ That one cell both installs the files **and** proves they work.
 
 ## Route C — they already exist somewhere in this session
 
-If you ran the earlier notebook in *this same session*, the files may still be
-around. Find them before re-uploading:
+If you ran the earlier notebook in *this same session*, the files may still
+be around. Find them before re-uploading:
 
-```python
+```bash
 !find /kaggle -name "train_probe.py" -o -name "benchmark.py" -o -name "pipeline.py" 2>/dev/null | grep -v site-packages
 ```
 
 Then copy what you find into the working directory:
 
-```python
+```bash
 !mkdir -p /kaggle/working && cp <path-from-above> /kaggle/working/
 ```
 
 > Note: files under `/kaggle/input/` are read-only. Always copy into
 > `/kaggle/working/` before running anything.
 
----
-
 ## Route D — upload the loose files
 
 If you prefer separate uploads: download `pipeline.py`, `train_probe.py`,
-`benchmark.py` from this workspace, then in Kaggle either upload them as one
-dataset or paste them into notebook cells:
+`benchmark.py` from the pinned repo commit, then in Kaggle either upload
+them as one dataset or paste them into notebook cells:
 
 ```python
 %%writefile /kaggle/working/pipeline.py
 # ...paste the file contents here...
 ```
 
-Repeat per file. Same result, more clicking.
+Same result, more clicking.
 
 ---
 
@@ -154,3 +136,16 @@ The GPU rules from earlier still hold; do not skip the session boundaries.
 
 Never run `!python evaluate_*.py` / `benchmark.py` with a live pipeline in the
 same session — that is the OOM path.
+
+---
+
+## Historical note: the `test_cpu_fallback` patch
+
+Earlier sessions carried a downloaded one-off patch for
+`tests/smoke_offline.py::test_cpu_fallback`. That test used to assert a
+float32 dtype while *assuming* the host had no GPU; on a Kaggle session with
+the accelerator ON, `t4_dtype()` correctly returned fp16 and the assertion
+failed. The fix — mock a CPU host instead of assuming one, plus a companion
+`test_gpu_host_reports_its_own_dtype` for GPU boxes — is **merged into the
+repo**. No patch download is needed at or after the pinned commit above; if a
+session ever asks you to fetch a patch script, stop and diff it instead.
