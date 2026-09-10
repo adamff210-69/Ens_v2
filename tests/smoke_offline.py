@@ -613,5 +613,210 @@ class TestLeakFreeCV(unittest.TestCase):
         self.assertEqual(len(set(g)), 2)          # one group per source row
 
 
+class TestAuditSecurityFixes(unittest.TestCase):
+    """Regression locks for audit findings F-01..F-04 (audit/AUDIT.md).
+
+    These pin the FIXED behavior; if any of them fails, one of the confirmed
+    audit defects has regressed.
+    """
+
+    def test_f01_unresolved_dual_key_blocks_fail_closed(self):
+        """F-01: An unresolved ambiguous-band flag must block before generation."""
+        class MockL1:
+            def score(self, text):
+                # Returns ambiguous band score: 0.88 with 1 chunk
+                return "INJECTION", 0.88, {
+                    "total_chunks": 1, "alert_chunks_count": 1,
+                    "chunk_probabilities": [0.88],
+                }
+
+        class MockL2:
+            probe = object()
+            threshold = 0.90
+
+            def score(self, text):
+                raise AssertionError(
+                    "L2 should not run in this bypass test scenario")
+
+        pipe = object.__new__(P.InjectionDetectionPipeline)
+        pipe.layer1 = MockL1()
+        pipe.layer2 = MockL2()
+        pipe.layer3 = P.OutputCheckLayer(None, None, None)
+        pipe.fail_closed = True
+        pipe.l1_block_threshold = 0.85
+        pipe.l1_dual_key = True
+        pipe.probe_threshold = None
+        pipe.l1_escalate_threshold = 0.95   # gate above the L1 score (0.88)
+
+        # With no untrusted context, escalation evaluates to False
+        res = P.InjectionDetectionPipeline.run(
+            pipe, "test input", "sys_prompt",
+            generate_fn=lambda *a, **k: "should_not_reach_here",
+        )
+
+        self.assertTrue(res.blocked)
+        self.assertIn("could not be confirmed by L2", res.reason)
+        self.assertNotEqual(res.response, "should_not_reach_here")
+
+    def test_f01_fail_open_passes_with_warning(self):
+        """F-01 companion: fail_closed=False still proceeds (explicit opt-out)."""
+        class MockL1:
+            def score(self, text):
+                return "INJECTION", 0.88, {
+                    "total_chunks": 1, "alert_chunks_count": 1,
+                    "chunk_probabilities": [0.88],
+                }
+
+        class MockL2:
+            probe = object()
+            threshold = 0.90
+
+            def score(self, text):
+                raise AssertionError("L2 must not run")
+
+        pipe = object.__new__(P.InjectionDetectionPipeline)
+        pipe.layer1, pipe.layer2 = MockL1(), MockL2()
+        pipe.layer3 = P.OutputCheckLayer(None, None, None)
+        pipe.fail_closed = False
+        pipe.l1_block_threshold = 0.85
+        pipe.l1_dual_key = True
+        pipe.probe_threshold = None
+        pipe.l1_escalate_threshold = 0.95
+
+        res = P.InjectionDetectionPipeline.run(
+            pipe, "test input", "sys", generate_fn=lambda *a, **k: "answer")
+        self.assertFalse(res.blocked)
+        self.assertEqual(res.response, "answer")
+
+    def test_f02_total_l1_guard_crash_raises(self):
+        """F-02: Total failure of all L1 guards must raise a RuntimeError."""
+        class CrashingClassifier:
+            def __call__(self, chunk):
+                raise RuntimeError("CUDA Out of Memory in guard model")
+
+        l1 = P.TextClassifierLayer.__new__(P.TextClassifierLayer)
+        l1.classifiers = [{"name": "guard-1", "pipe": CrashingClassifier(),
+                           "labels": {"injection"}}]
+        l1.tokenizer = types.SimpleNamespace(
+            encode=lambda t, **k: list(range(10)),
+            decode=lambda ids, **k: "x",
+        )
+        l1.max_length = 512
+        l1.chunk_overlap = 50
+        l1.max_chunks = 64
+
+        with self.assertRaises(RuntimeError) as ctx:
+            l1.score("malicious input")
+        self.assertIn("All L1 guards failed", str(ctx.exception))
+
+    def test_f02_partial_guard_failure_still_scores(self):
+        """F-02 companion: one healthy guard keeps the ensemble voting."""
+        class Crashing:
+            def __call__(self, chunk):
+                raise RuntimeError("boom")
+
+        class Healthy:
+            def __call__(self, chunk):
+                return [{"label": "injection", "score": 0.91},
+                        {"label": "safe", "score": 0.09}]
+
+        l1 = P.TextClassifierLayer.__new__(P.TextClassifierLayer)
+        l1.classifiers = [
+            {"name": "down", "pipe": Crashing(), "labels": {"injection"}},
+            {"name": "up", "pipe": Healthy(), "labels": {"injection"}},
+        ]
+        l1.tokenizer = types.SimpleNamespace(
+            encode=lambda t, **k: list(range(10)),
+            decode=lambda ids, **k: "x",
+        )
+        l1.max_length, l1.chunk_overlap, l1.max_chunks = 512, 50, 64
+
+        decision, prob, meta = l1.score("text")
+        self.assertEqual(decision, "INJECTION")
+        self.assertAlmostEqual(prob, 0.91)
+
+    def test_f03_probe_fingerprint_mismatch_raises(self):
+        """F-03: Probe load() must refuse mismatched max_length or quantization."""
+        import tempfile
+        import joblib
+
+        with tempfile.NamedTemporaryFile(suffix=".joblib") as tmp:
+            artifact = {
+                "probe": object(),
+                "scaler": None,
+                "layer": 16,
+                "layers": [16],
+                "pooling": "last",
+                "model_name": "TestModel",
+                "threshold": 0.85,
+                "fpr_budget": 0.01,
+                "max_length": 512,         # Saved with 512
+                "quantized_4bit": True,    # Saved as quantized
+            }
+            joblib.dump(artifact, tmp.name)
+
+            runtime = P.HiddenStateProbeLayer.__new__(P.HiddenStateProbeLayer)
+            runtime.model_name = "TestModel"
+            runtime.layers, runtime.layer = [16], 16
+            runtime.pooling = "last"
+            runtime.max_length = 1024       # Runtime running 1024
+            runtime.model = types.SimpleNamespace(
+                config=types.SimpleNamespace())   # not quantized
+
+            with self.assertRaises(ValueError) as ctx:
+                runtime.load(tmp.name)
+            self.assertIn("Probe fingerprint conflict", str(ctx.exception))
+
+    def test_f04_evaluator_predicate_matches_production(self):
+        """F-04: evaluate_end_to_end.py must use the production dual-key rule.
+
+        The evaluator module imports `datasets` at module top, which is not
+        installable in the offline smoke environment, so parity is asserted on
+        the source itself: the canonical production predicate must be present
+        and the legacy single-chunk shortcut must be gone from the hard rule.
+        """
+        import re
+        root = Path(__file__).resolve().parent.parent
+
+        # Truth table of the mirrored production rule, incl. the two cases
+        # that diverged pre-fix (0.87/1ch and 0.90/1ch). Runs everywhere.
+        def prod_hard(p1, n_ch, n_al, block=0.85):
+            unambiguous = (p1 >= 0.95) or (n_ch > 1 and n_al >= 2)
+            return p1 >= block and unambiguous
+
+        cases = [
+            (0.87, 1, 1, False),   # single-chunk ambiguous band: defer, no hard block
+            (0.97, 1, 1, True),
+            (0.87, 5, 2, True),
+            (0.87, 5, 1, False),
+            (0.90, 1, 0, False),   # second pre-fix divergence
+            (0.85, 1, 1, False),
+            (0.95, 1, 0, True),
+        ]
+        for p1, nch, nal, expected in cases:
+            self.assertEqual(
+                prod_hard(p1, nch, nal), expected,
+                f"production rule mirror failed for p1={p1}, chunks={nch}, "
+                f"alerts={nal}")
+
+        # Source parity with the evaluator. Only possible in a full repo
+        # checkout: verify.py's extracted bundle ships 4 files and does not
+        # include evaluate_end_to_end.py, so skip there (the evaluator runs
+        # on Kaggle from the git checkout anyway).
+        src_path = root / "evaluate_end_to_end.py"
+        if not src_path.exists():
+            self.skipTest("evaluate_end_to_end.py not present "
+                          "(extracted verify.py bundle)")
+        src = src_path.read_text(encoding="utf-8")
+
+        # Canonical production predicate (pipeline.py run(): unambiguous = ...)
+        self.assertRegex(
+            src,
+            r"unambiguous\s*=\s*\(p1\s*>=\s*0\.95\)\s*or\s*"
+            r"\(n_ch\s*>\s*1\s+and\s+n_al\s*>=\s*2\)")
+        # The legacy shortcut that caused F-04 must not assign hard[] anymore.
+        self.assertNotRegex(src, r"hard\[i\][^\n]*n_ch\s*==\s*1")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

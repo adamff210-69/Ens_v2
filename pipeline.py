@@ -354,6 +354,8 @@ class TextClassifierLayer:
     def _injection_prob(self, chunk: str) -> Tuple[float, List[float]]:
         """Per-guard injection probabilities for one chunk -> (max, votes)."""
         votes: List[float] = []
+        guard_errors: List[str] = []
+
         for clf_entry in self.classifiers:
             prob = 0.0
             try:
@@ -372,9 +374,18 @@ class TextClassifierLayer:
                     # Binary fallback: complement of the single returned label
                     if len(results) == 1:
                         prob = 1.0 - float(results[0]["score"])
+                votes.append(prob)
             except Exception as e:  # noqa: BLE001
                 logger.error("L1 guard %s failed on chunk: %s", clf_entry["name"], e)
-            votes.append(prob)
+                guard_errors.append(f"{clf_entry['name']}: {e}")
+
+        # Fail-closed check: if all guards failed, raise to trigger run()'s
+        # fail-closed handler. A total guard failure must never masquerade as
+        # a unanimous SAFE verdict (audit finding F-02).
+        if self.classifiers and len(guard_errors) == len(self.classifiers):
+            raise RuntimeError(
+                f"All L1 guards failed on chunk ({'; '.join(guard_errors)})"
+            )
 
         return (max(votes) if votes else 0.0), votes
 
@@ -781,12 +792,12 @@ class HiddenStateProbeLayer:
         """Restore a probe with strict hardware/model/layer fingerprint checks.
 
         Raises ValueError on any mismatch — probes do NOT transfer across
-        base models or layers, and a garbage probe would silently erode the
-        security posture (fail-fast beats fail-silent).
+        base models, layers, sequence lengths, or quantization regimes.
         """
         import joblib
         d = joblib.load(filepath)
 
+        # 1. Base Model Check
         trained_model = d.get("model_name")
         if trained_model and trained_model != self.model_name:
             raise ValueError(
@@ -794,6 +805,8 @@ class HiddenStateProbeLayer:
                 f"{trained_model!r}, pipeline is running {self.model_name!r}. "
                 f"Retrain the probe on the current base model."
             )
+
+        # 2. Layer Index Check
         trained_layers = d.get("layers")
         if trained_layers is None:
             trained_layers = [d.get("layer")] if d.get("layer") is not None else None
@@ -806,6 +819,39 @@ class HiddenStateProbeLayer:
                     f"Hidden states are layer-specific — retrain or align probe layers."
                 )
 
+        # 3. Max Sequence Length Check
+        saved_max_len = d.get("max_length")
+        if saved_max_len is not None and getattr(self, "max_length", None) is not None:
+            if int(saved_max_len) != int(self.max_length):
+                raise ValueError(
+                    f"Probe fingerprint conflict: artifact was trained with max_length={saved_max_len}, "
+                    f"but pipeline is running max_length={self.max_length}. "
+                    f"Activation feature vectors depend on token span — retrain or align max_length."
+                )
+
+        # 4. Quantization Check
+        saved_quant = d.get("quantized_4bit")
+        current_quant = bool(getattr(
+            getattr(getattr(self, "model", None), "config", None), "quantization_config", None
+        ))
+        if saved_quant is not None and saved_quant != current_quant:
+            raise ValueError(
+                f"Probe fingerprint conflict: artifact was trained with quantized_4bit={saved_quant}, "
+                f"but current runtime model has quantized_4bit={current_quant}. "
+                f"Activation distributions diverge under 4-bit quantization — retrain probe."
+            )
+
+        # 5. Dtype Notice (warn only to allow safe float16 <-> bfloat16 portability)
+        saved_dtype = d.get("compute_dtype")
+        if saved_dtype is not None:
+            current_dtype = str(VRAMManager.get_optimal_dtype())
+            if saved_dtype != current_dtype:
+                logger.warning(
+                    "Probe fingerprint notice: artifact trained with compute_dtype=%s, "
+                    "current runtime optimal dtype is %s.",
+                    saved_dtype, current_dtype,
+                )
+
         self.probe = d["probe"]
         self.scaler = d.get("scaler")
         if trained_layers:
@@ -814,6 +860,9 @@ class HiddenStateProbeLayer:
         self.pooling = d.get("pooling", "last")
         self.threshold = float(d.get("threshold", 0.5))
         self.fpr_budget = float(d.get("fpr_budget", 0.01))
+        if saved_max_len is not None:
+            self.max_length = int(saved_max_len)
+
         logger.info(
             "Probe restored <- %s [layers=%s pooling=%s thr=%.4f fpr_budget=%.2f]",
             filepath, self.layers, self.pooling, self.threshold, self.fpr_budget,
@@ -1192,6 +1241,23 @@ class InjectionDetectionPipeline:
             logger.info(
                 "Escalation triggered but no trained probe available — "
                 "train one with train_probe.py and pass probe_path to enable L2."
+            )
+
+        # ---- Dual-Key Enforcement Gate (audit finding F-01) ----------------
+        # If Layer 1 flagged an ambiguous attack requiring L2 confirmation, but
+        # Layer 2 was skipped or failed to resolve it, we must fail-closed.
+        # Without this choke point, an l1_escalate_threshold above the L1 score
+        # (with no untrusted context) lets a pending flag reach generation.
+        if (result.metadata.get("l1_dual_key_pending")
+                and not result.metadata.get("l1_dual_key_resolved")):
+            if self.fail_closed:
+                result.blocked = True
+                result.reason = ("Layer 1 ambiguous band could not be confirmed "
+                                 "by L2 (fail-closed)")
+                return done(result)
+            logger.warning(
+                "L1 ambiguous band was left unconfirmed by L2, but proceeding "
+                "because fail_closed=False."
             )
 
         # ==================== Generation (no output yet) ====================

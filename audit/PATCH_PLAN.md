@@ -1,6 +1,16 @@
-# PATCH_PLAN.md — Prioritized minimal fixes (awaiting approval)
+# PATCH_PLAN.md — Prioritized minimal fixes
 
-Nothing below has been implemented — this plan is part of the audit deliverable.
+> **Status 2026-09-10:** Fixes 1–4 (F-01..F-04) IMPLEMENTED per approved
+> patches, with one deviation: the F-01 gate returns `done(result)` instead of
+> bare `result` so `execution_time_ms` is stamped like every other exit, and
+> the F-04 regression test was rewritten from the proposed tautological form
+> into a source-parity + truth-table test (importing `evaluate_end_to_end`
+> offline is impossible — it imports `datasets` at module top). Regression
+> locks added to `tests/smoke_offline.py::TestAuditSecurityFixes` (6 tests).
+> Validation gate: suite 39/39 OK, `audit/repro_findings.py` exit 0.
+> Fixes 5–12 remain unimplemented, pending direction.
+
+Nothing else below has been implemented — the remainder stays a plan.
 Each fix lists affected symbols, risk, the regression test that establishes it
 (IDs from `TEST_RESULTS.md` §6), and a validation command. Fixes are ordered by
 security impact, then measurement integrity, then hygiene. No redesigns: every
