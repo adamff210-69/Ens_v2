@@ -57,7 +57,7 @@ python evaluate_probe.py --model "Qwen/Qwen2.5-7B-Instruct" \
 
 | Scope | What ran | Result |
 |---|---|---|
-| Offline regression | `python3 tests/smoke_offline.py` — VRAM policy/memory-map math (mocked 2xT4), both drafts' aliases, L3 statics, augmentation, orchestrator control flow incl. all fail-closed paths | 14/14 pass |
+| Offline regression | `python3 tests/smoke_offline.py` — VRAM policy/memory-map math (mocked 2xT4), both drafts' aliases, L3 statics, augmentation, orchestrator control flow incl. all fail-closed paths, dual-key policy, grouped CV, training-set assembly | 33/33 pass |
 | Real L1 | ProtectAI DeBERTa on CPU: benign, direct jailbreak, RAG-context attack, 10-chunk long doc, long doc + one trailing quote (only last window fires) | behaves per spec |
 | Real L2 | Train/save/load/score probe on real LLM hidden states (SmolLM2-135M stand-in, layer 20/30 ~= 20/28 on Qwen2.5-7B); model + layer fingerprint mismatches both rejected | pass |
 | End-to-end | Full 3-layer `pipeline.run()` with real generation: benign scenario allowed with answer, both attack scenarios blocked (L1 at p=1.0) | pass |
@@ -196,8 +196,10 @@ Never build a second pipeline in the same session.
 
 ## Getting the files onto Kaggle
 
-See **INSTALL.md**. Short version: download `verify.py` (one stdlib-only file
-with every source embedded + SHA-256 pinned), upload it, then
+See **INSTALL.md**. Preferred: `git clone` this repo on Kaggle at a pinned
+commit and run `verify.py`. Fallback without internet: download `verify.py`
+(one stdlib-only file with every source embedded + SHA-256 pinned), upload
+it, then
 
 ```python
 %cd /kaggle/working && !python verify.py

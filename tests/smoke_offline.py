@@ -55,6 +55,15 @@ def _install_dependency_stubs() -> None:
 
         torch.inference_mode = _mode_decorator
         torch.no_grad = _mode_decorator
+
+        class _Tensor:
+            """Scipy's array-api compat layer probes ``torch.Tensor`` when
+            sklearn is imported; a stub without it makes
+            ``import sklearn.model_selection`` crash and silently skips the
+            leak-free CV tests. The stub only needs the attribute to exist."""
+
+        torch.Tensor = _Tensor
+        torch.__version__ = "0.0.0+smoke-stub"
         cuda = types.SimpleNamespace(
             is_bf16_supported=lambda: False,
             mem_get_info=lambda *a: (0, 0),
@@ -412,9 +421,10 @@ class TestMultiLayerProbe(unittest.TestCase):
             wrong = self._probe_stub([12, 16, 20, 24])
             try:
                 wrong.load(path)
-                raise SystemExit("layer-list fingerprint check FAILED to raise")
             except ValueError:
                 pass
+            else:
+                self.fail("layer-list fingerprint check FAILED to raise")
 
 
 class TestDualKeyPolicy(unittest.TestCase):
@@ -514,11 +524,9 @@ class TestTrainingSetAssembly(unittest.TestCase):
         spec_map = {"a/pos": ([f"p{i}" for i in range(40)], [1] * 40)}
         T, orig = self._patch_loaders(spec_map, [f"nj{i}" for i in range(30)])
         try:
-            T.load_spec = lambda spec, max_rows=None: (
-                spec_map["a/pos"][0], spec_map["a/pos"][1],
-                [f"s{i}" for i in range(100)], [0] * 100)[2:] if False else (
-                spec_map["a/pos"][0], spec_map["a/pos"][1])
-            # soft negatives come from a second corpus via load_spec
+            # Positives come from the first corpus; soft negatives from a
+            # second one, so balancing has something to drop if the
+            # hard-negative protection regresses.
             T.load_spec = lambda spec, max_rows=None: (
                 ([f"p{i}" for i in range(40)], [1] * 40) if "pos" in spec
                 else ([f"s{i}" for i in range(100)], [0] * 100))
