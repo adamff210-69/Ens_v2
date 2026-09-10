@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a stdlib-only, self-extracting installer for the pipeline stack.
 
-Output: /home/user/injection_pipeline/verify.py
+Output: verify.py, written next to this script
 
 Payload is gzip-compressed then base85-encoded (3.4x smaller than raw base64),
 so the single file is small enough to upload quickly or paste into a cell.
@@ -46,9 +46,10 @@ Usage, in the directory you want the files written to (e.g. /kaggle/working):
 
     python3 verify.py
 
-Writes pipeline.py, train_probe.py, benchmark.py and tests/smoke_offline.py,
-verifies each against a pinned SHA-256, then runs the offline test suite so a
-bad transfer cannot go unnoticed.
+Verifies each embedded payload (pipeline.py, train_probe.py, benchmark.py,
+tests/smoke_offline.py) against a pinned SHA-256 BEFORE writing anything,
+extracts only if all digests match, re-hashes the written files, and then
+runs the offline test suite so a bad transfer cannot go unnoticed.
 
 Stdlib only: no pip installs, no network, Python 3.8+.
 """
@@ -71,29 +72,52 @@ __EXPECTED__
 
 
 def main() -> int:
-    print("extracting %d files into %s" % (len(FILES), os.getcwd()))
+    # Verify FIRST, write SECOND (audit finding F-11). The old installer
+    # overwrote files in the CWD before checking digests, so re-running it
+    # in a tree with local edits silently reverted those edits before
+    # reporting the mismatch. Now: decode + hash in memory, compare all
+    # digests, write only if every payload matches, then re-hash from disk.
+    print("verifying %d embedded payloads (in memory, nothing written yet)"
+          % len(FILES))
+    decoded = {}
     bad = []
     for name, payload in FILES.items():
         raw = gzip.decompress(base64.b85decode("".join(payload)))
         digest = hashlib.sha256(raw).hexdigest()
+        ok = digest == EXPECTED[name]
+        print("  [%s] %-26s %7d bytes  sha256 %s"
+              % ("OK " if ok else "BAD", name, len(raw), digest[:16]))
+        decoded[name] = raw
+        if not ok:
+            bad.append(name)
+
+    if bad:
+        print("\\nCHECKSUM MISMATCH: %s" % ", ".join(bad))
+        print("The embedded payload is corrupt - re-copy verify.py in full.")
+        print("No files were written.")
+        return 2
+
+    print("\\nall checksums match - extracting into %s" % os.getcwd())
+    post_write_bad = []
+    for name, raw in decoded.items():
         target = os.path.join(os.getcwd(), name)
         parent = os.path.dirname(target)
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(target, "wb") as fh:
             fh.write(raw)
-        ok = digest == EXPECTED[name]
-        if not ok:
-            bad.append(name)
-        print("  [%s] %-26s %7d bytes  sha256 %s"
-              % ("OK " if ok else "BAD", name, len(raw), digest[:16]))
+        # Belt and suspenders: re-hash what actually landed on disk.
+        with open(target, "rb") as fh:
+            on_disk = hashlib.sha256(fh.read()).hexdigest()
+        if on_disk != EXPECTED[name]:
+            post_write_bad.append(name)
+            print("  [BAD] %s differs on disk after writing" % name)
 
-    if bad:
-        print("\\nCHECKSUM MISMATCH: %s" % ", ".join(bad))
-        print("The embedded payload is corrupt - re-copy verify.py in full.")
-        return 2
+    if post_write_bad:
+        print("\\nPOST-WRITE MISMATCH: %s" % ", ".join(post_write_bad))
+        return 3
 
-    print("\\nall checksums match")
+    print("extraction verified from disk")
     if os.path.exists("tests/smoke_offline.py"):
         print("\\nrunning offline test suite...\\n")
         rc = subprocess.call([sys.executable, "tests/smoke_offline.py"])

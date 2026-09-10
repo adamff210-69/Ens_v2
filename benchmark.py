@@ -9,8 +9,12 @@ Configurations compared (all sharing the same L1/L2 scores):
   * L1-only            - surface guard(s) alone
   * L2-only            - hidden-state probe alone
   * stack (legacy)     - L1 hard-block OR (L1>=gate AND L2>=thr)
-  * stack (dual-key)   - L1 block iff extreme, ambiguous band needs L2 confirm
   * stack (always-on)  - L1 hard-block OR L2>=thr
+
+No dual-key row is emitted: since this harness scores L2 on every
+non-hard-blocked row, dual-key's blocked-or-not bit is algebraically
+identical to always-on (audit finding F-05). Its serving-side behavior is
+covered by TestDualKeyPolicy in tests/smoke_offline.py instead.
 
 Datasets (test/held-out splits only — never used for training):
   * deepset/prompt-injections (test)
@@ -199,14 +203,21 @@ def main() -> None:
         l2_only = p2 >= thr                      # NaN -> False
         legacy = hard | ((p1 >= args.l1_gate) & (p2 >= thr))
         always_on = hard | (p2 >= thr)
-        dual_key = hard | ((p1 >= args.l1_block) & ~hard & (p2 >= thr)) | (p2 >= thr)
 
+        # NOTE: no dual-key row here, by design (audit finding F-05).
+        # This harness scores L2 on EVERY non-hard-blocked row, so dual-key's
+        # blocked-or-not bit is algebraically identical to always-on:
+        #   hard | ((p1 >= block) & ~hard & (p2 >= thr)) | (p2 >= thr)
+        #     == hard | (p2 >= thr)
+        # Dual-key differs from always-on only in *attribution* (which layer
+        # blocked) and in latency, not in TPR/FPR — reporting it as a separate
+        # policy row was a phantom ablation. The serving-side behavior is
+        # verified instead by TestDualKeyPolicy in tests/smoke_offline.py.
         defs = {
             "L1-only": l1_only,
             "L2-only": l2_only,
             "stack(legacy gate)": legacy,
             "stack(always-on)": always_on,
-            "stack(dual-key)": dual_key,
         }
 
         for cfg, blocked in defs.items():

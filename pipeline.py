@@ -652,8 +652,14 @@ class HiddenStateProbeLayer:
           silently costs recall. The threshold is read off out-of-fold
           probabilities, which match how the probe scores in production.
 
-        The threshold is the LARGEST value whose OOF FPR stays <= ``fpr_budget``
-        (security-first: benign business context should rarely trip the probe).
+        Select the recall-maximizing (LOWEST) threshold whose out-of-fold FPR
+        stays <= ``fpr_budget``. ROC points are ordered by increasing FPR, so
+        this is ``ok[-1]`` among the budget-feasible indices. If no point
+        meets the budget, fall back to 0.90 and log a warning.
+
+        Security-first here means "never exceed the FPR budget", NOT "pick
+        the strictest threshold" — ``ok[0]`` would be budget-feasible too but
+        would silently drop recall on unseen traffic.
         """
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import (
@@ -1009,6 +1015,43 @@ class OutputCheckLayer:
     execute_self_judge = judge_response
 
 
+# ---------------------------------------------------------------------------
+# Configuration validation (audit finding F-12)
+# ---------------------------------------------------------------------------
+def _validate_thresholds(
+    l1_block_threshold: float,
+    l1_escalate_threshold: float,
+    probe_threshold: Optional[float],
+) -> None:
+    """Reject threshold configs that cannot mean what they say.
+
+    Probabilities live in [0, 1]; a threshold outside that range silently
+    disables the layer it gates (e.g. ``probe_threshold=1.5`` can never be
+    reached, so Layer 2 would never block; ``l1_block_threshold=2.0`` would
+    never fire). NaN is rejected by the same comparison.
+
+    Warn — but do not error — when the escalate gate sits above the block
+    threshold: since the F-01 fix that configuration is fail-closed-safe
+    (unresolved ambiguous-band requests are blocked before generation), it is
+    merely surprising, not unsafe.
+    """
+    for name, value in (("l1_block_threshold", l1_block_threshold),
+                        ("l1_escalate_threshold", l1_escalate_threshold),
+                        ("probe_threshold", probe_threshold)):
+        if value is None:
+            continue
+        if not (0.0 <= float(value) <= 1.0):
+            raise ValueError(f"{name}={value!r} is outside [0, 1]")
+
+    if l1_escalate_threshold > l1_block_threshold:
+        logger.warning(
+            "l1_escalate_threshold (%.3f) > l1_block_threshold (%.3f): "
+            "ambiguous-band L1 hits can skip L2 unless untrusted_context is "
+            "set. The dual-key fail-closed gate will block those requests.",
+            l1_escalate_threshold, l1_block_threshold,
+        )
+
+
 # ===========================================================================
 # Master pipeline orchestrator
 # ===========================================================================
@@ -1047,6 +1090,12 @@ class InjectionDetectionPipeline:
         # removes class of false positives (e.g. ProtectAI's repetition-triggered
         # spikes) without losing the explicit-attack path (those score >=0.95).
         self.l1_dual_key = l1_dual_key
+
+        # Reject threshold configs that cannot mean what they say (audit
+        # F-12) — before loading any models.
+        _validate_thresholds(self.l1_block_threshold,
+                             self.l1_escalate_threshold,
+                             self.probe_threshold)
 
         # Layer 1: surface guard(s) — optional ensemble via l1_models
         self.layer1 = TextClassifierLayer(models=l1_models)

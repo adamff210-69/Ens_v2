@@ -1,5 +1,17 @@
 # PATCH_PLAN.md — Prioritized minimal fixes
 
+> **Status 2026-09-10 (Batch A):** Fixes 5, 6, 7 (F-12) and 10 (F-11) also
+> IMPLEMENTED and regression-locked: `benchmark.py` no longer emits the
+> phantom dual-key row (docstring updated to match), the `train()` docstring
+> now describes the actual recall-maximizing `ok[-1]` selection,
+> `_validate_thresholds()` rejects out-of-range/NaN thresholds at pipeline
+> construction (warn-only when escalate > block — safe since the F-01 gate),
+> and the generated `verify.py` installer is now verify-then-write
+> (tampered digest ⇒ exit 2 with nothing written; proven to preserve local
+> edits in a dirty tree). Suite: 43/43 OK; `audit/repro_findings.py` exit 0.
+> Remaining: Fix 8 (needs D-2 decision), Fix 9 (needs F-07 decision),
+> Fix 11 (needs Kaggle training run), Fix 12 (D-1 revision pins).
+>
 > **Status 2026-09-10:** Fixes 1–4 (F-01..F-04) IMPLEMENTED per approved
 > patches, with one deviation: the F-01 gate returns `done(result)` instead of
 > bare `result` so `execution_time_ms` is stamped like every other exit, and

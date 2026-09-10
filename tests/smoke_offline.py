@@ -817,6 +817,94 @@ class TestAuditSecurityFixes(unittest.TestCase):
         # The legacy shortcut that caused F-04 must not assign hard[] anymore.
         self.assertNotRegex(src, r"hard\[i\][^\n]*n_ch\s*==\s*1")
 
+    def test_f05_benchmark_has_no_phantom_dual_key_config(self):
+        """F-05: benchmark.py must not report dual-key as a distinct policy.
+
+        With always-on L2 scoring, dual-key's blocked-or-not bit is
+        algebraically identical to always-on; presenting it as a separate
+        row was a phantom ablation. benchmark.py ships in the verify.py
+        bundle, so this runs in extracted environments too.
+        """
+        root = Path(__file__).resolve().parent.parent
+        src_path = root / "benchmark.py"
+        if not src_path.exists():
+            self.skipTest("benchmark.py not present")
+        src = src_path.read_text(encoding="utf-8")
+        self.assertNotIn("stack(dual-key)", src)
+        self.assertIn("stack(always-on)", src)
+
+    def test_f12_threshold_validation_rejects_out_of_range(self):
+        """F-12: thresholds outside [0, 1] (incl. NaN) must be rejected."""
+        for bad in (-0.1, 1.5, 2.0, float("nan")):
+            with self.assertRaises(ValueError):
+                P._validate_thresholds(bad, 0.0, None)
+            with self.assertRaises(ValueError):
+                P._validate_thresholds(0.85, bad, None)
+            with self.assertRaises(ValueError):
+                P._validate_thresholds(0.85, 0.0, bad)
+
+    def test_f12_threshold_validation_accepts_valid_and_warns_on_gate_order(self):
+        """F-12 companion: valid ranges pass; escalate > block only warns.
+
+        Asserts on the logger call itself: the suite globally disables
+        logging (logging.disable), so assertLogs would never see the record.
+        """
+        import unittest.mock as mock
+
+        P._validate_thresholds(0.85, 0.0, None)     # no raise
+        P._validate_thresholds(0.85, 0.0, 0.9)      # no raise
+        P._validate_thresholds(1.0, 1.0, 1.0)       # boundaries inclusive
+        with mock.patch.object(P.logger, "warning") as warn:
+            P._validate_thresholds(0.85, 0.9, None)   # escalate > block
+        self.assertTrue(warn.called, "escalate>block must log a warning")
+        self.assertIn("l1_escalate_threshold", warn.call_args[0][0])
+        with mock.patch.object(P.logger, "warning") as warn:
+            P._validate_thresholds(0.85, 0.0, None)   # sane config: no warning
+        self.assertFalse(warn.called)
+
+    def test_f11_verify_py_writes_nothing_on_checksum_mismatch(self):
+        """F-11: verify.py must verify-then-write — a checksum mismatch must
+        exit non-zero WITHOUT touching the target files (the old installer
+        overwrote first and reported the mismatch afterwards)."""
+        import os
+        import re as _re
+        import subprocess
+        import tempfile
+
+        root = Path(__file__).resolve().parent.parent
+        src_path = root / "verify.py"
+        if not src_path.exists():
+            self.skipTest("verify.py not present")
+        text = src_path.read_text(encoding="utf-8")
+
+        m = _re.search(r'EXPECTED = \{\n    "([^"]+)": "([0-9a-f]{64})"', text)
+        self.assertIsNotNone(m, "EXPECTED table not found in verify.py")
+        target_name, good_digest = m.group(1), m.group(2)
+
+        # Corrupt the first pinned digest (digests appear only in EXPECTED).
+        bad_digest = ("0" if good_digest[0] != "0" else "1") + good_digest[1:]
+        self.assertIn(good_digest, text)
+        tampered = text.replace(good_digest, bad_digest, 1)
+
+        with tempfile.TemporaryDirectory() as d:
+            script = Path(d) / "verify_tampered.py"
+            script.write_text(tampered, encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(script)], cwd=d,
+                capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 2,
+                             f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+            self.assertIn("CHECKSUM MISMATCH", proc.stdout)
+            self.assertIn("No files were written", proc.stdout)
+            self.assertFalse(
+                (Path(d) / target_name).exists(),
+                "verify.py wrote files despite checksum mismatch")
+            # And no other bundled file either.
+            for other in ("pipeline.py", "train_probe.py", "benchmark.py",
+                          os.path.join("tests", "smoke_offline.py")):
+                self.assertFalse((Path(d) / other).exists(),
+                                 f"{other} written despite mismatch")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
