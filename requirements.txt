@@ -1,0 +1,14 @@
+# Kaggle 2x Tesla T4 runtime
+transformers>=4.44
+accelerate
+bitsandbytes
+scikit-learn
+joblib
+datasets
+sentencepiece
+protobuf
+numpy
+
+# Local smoke-testing (CPU, optional) — torch CPU wheel ~200 MB
+# torch>=2.2
+# tokenizers>=0.19
