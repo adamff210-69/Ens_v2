@@ -262,3 +262,19 @@ proposed version was a tautology and the evaluator module cannot be imported
 offline). `verify.py` was regenerated and re-validated end-to-end from an
 extracted bundle. Findings F-05..F-14 and design questions D-1..D-5 remain
 open per `PATCH_PLAN.md`.
+
+**Batch A addendum (same day):** fixes 5, 6, 7 (F-12) and 10 (F-11) of
+`PATCH_PLAN.md` were approved and implemented in commit
+`8f71cce7eb147b65a93843994465593f0e8e1072`: phantom dual-key benchmark row
+dropped, `train()` docstring corrected to describe the actual
+recall-maximizing `ok[-1]` selection, `_validate_thresholds()` rejects
+out-of-range/NaN thresholds at construction (escalate>block warns only), and
+the generated installer is now verify-then-write (tampered digest ⇒ exit 2,
+nothing written — proven to preserve local edits in a dirty tree). Suite:
+43/43 OK; repro harness exit 0. Remaining open: Fix 8 (needs D-2 decision),
+Fix 9 (needs F-07 decision), Fix 11 (needs Kaggle training run), Fix 12 (D-1).
+
+**Operational note:** a sandbox reset on 2026-09-10 reverted the local clone
+to the base commit; the remote branch kept the full chain, so local history
+was recovered with `git fetch` and Batch A was committed directly on top of
+`2a03104`. No content was reconstructed or altered by this recovery.

@@ -23,13 +23,16 @@ the audited code:
     %cd /kaggle/working
     !git clone https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout b87ac4c5bc2600db7138fa5abd4f6996e960a1fe   # audited artifact
-                                                            # (post audit-fixes
-                                                            # F-01..F-04)
+    !git checkout 8f71cce7eb147b65a93843994465593f0e8e1072   # audited artifact
+                                                            # (audit fixes
+                                                            # F-01..F-06, F-11,
+                                                            # F-12 included)
     !python verify.py
 
-Which extracts the four runtime files, verifies each against a pinned
-SHA-256, runs the 33-test offline suite, and prints the training commands.
+Which verifies each embedded payload against a pinned SHA-256 **before
+writing anything**, extracts the four runtime files only if all digests
+match (then re-hashes them from disk), and runs the 43-test offline suite.
+A mismatch exits non-zero and leaves your local files untouched.
 
 If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 
@@ -58,17 +61,20 @@ you can audit it before uploading.
 Expected output:
 
 ```
-extracting 4 files into /kaggle/working
-  [OK ] pipeline.py                  58647 bytes  sha256 fcbf59e606266d1a
+verifying 4 embedded payloads (in memory, nothing written yet)
+  [OK ] pipeline.py                  64222 bytes  sha256 6d96c01dbe3d4b75
   [OK ] train_probe.py               14109 bytes  sha256 f7b8622edf6147a4
-  [OK ] benchmark.py                 10551 bytes  sha256 10672b7dd26b9b14
-  [OK ] tests/smoke_offline.py       25927 bytes  sha256 0d405a7a5ee401a3
-all checksums match
+  [OK ] benchmark.py                 11251 bytes  sha256 c7cfca4947e01006
+  [OK ] tests/smoke_offline.py       38717 bytes  sha256 b2523bca3fa54953
+all checksums match - extracting into /kaggle/working
+extraction verified from disk
 running offline test suite...
 smoke suite PASSED
 ```
 
-That one cell both installs the files **and** proves they work.
+That one cell both installs the files **and** proves they work. Since the
+installer verifies *before* writing, re-running it in a directory with local
+edits reports the mismatch and exits without reverting your changes.
 
 ---
 
