@@ -23,7 +23,9 @@ the audited code:
     %cd /kaggle/working
     !git clone https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout 5ac5e4399a433ac5513f4df56544d71aca2396f4   # audited artifact
+    !git checkout b87ac4c5bc2600db7138fa5abd4f6996e960a1fe   # audited artifact
+                                                            # (post audit-fixes
+                                                            # F-01..F-04)
     !python verify.py
 
 Which extracts the four runtime files, verifies each against a pinned

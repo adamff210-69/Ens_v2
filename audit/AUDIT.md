@@ -245,3 +245,20 @@ when L1 and L2 *disagree at the extremes* (L1 ≥0.95 blocks even if L2 would pa
 See `LOGIC_MATRIX.md` for decision tables, `TEST_RESULTS.md` for executed
 commands/logs, `PATCH_PLAN.md` for prioritized fixes. **No source code was
 modified during this audit; awaiting approval before implementing fixes.**
+
+---
+
+## Addendum — 2026-09-10 (post-audit fixes approved and implemented)
+
+Fixes 1–4 of `PATCH_PLAN.md` (findings F-01, F-02, F-03, F-04) were approved
+and implemented in commit `b87ac4c5bc2600db7138fa5abd4f6996e960a1fe`, with
+regression locks in `tests/smoke_offline.py::TestAuditSecurityFixes`
+(suite: 39/39 OK). `audit/repro_findings.py` now exits 0 with all four
+verdicts FIXED and the default-path control unchanged. Two deliberate
+deviations from the approved patch text are recorded in the `PATCH_PLAN.md`
+status note (timing-stamp-consistent `done(result)` in the F-01 gate;
+F-04 regression test rewritten as source-parity + truth-table because the
+proposed version was a tautology and the evaluator module cannot be imported
+offline). `verify.py` was regenerated and re-validated end-to-end from an
+extracted bundle. Findings F-05..F-14 and design questions D-1..D-5 remain
+open per `PATCH_PLAN.md`.
