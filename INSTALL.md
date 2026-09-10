@@ -23,7 +23,7 @@ the audited code:
     %cd /kaggle/working
     !git clone https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout 8f71cce7eb147b65a93843994465593f0e8e1072   # audited artifact
+    !git checkout a0e7cad1c95224ba9ef2a2ff45cd45f0be6bc907   # audited artifact
                                                             # (audit fixes
                                                             # F-01..F-06, F-11,
                                                             # F-12 included)
@@ -62,10 +62,10 @@ Expected output:
 
 ```
 verifying 4 embedded payloads (in memory, nothing written yet)
-  [OK ] pipeline.py                  64222 bytes  sha256 6d96c01dbe3d4b75
+  [OK ] pipeline.py                  65612 bytes  sha256 fe0ff0903eb71ae0
   [OK ] train_probe.py               14109 bytes  sha256 f7b8622edf6147a4
-  [OK ] benchmark.py                 11251 bytes  sha256 c7cfca4947e01006
-  [OK ] tests/smoke_offline.py       38717 bytes  sha256 b2523bca3fa54953
+  [OK ] benchmark.py                 11355 bytes  sha256 e3a90fe35e3ec82a
+  [OK ] tests/smoke_offline.py       38804 bytes  sha256 71acb03fa1ea5453
 all checksums match - extracting into /kaggle/working
 extraction verified from disk
 running offline test suite...
