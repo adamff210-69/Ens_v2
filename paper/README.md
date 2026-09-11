@@ -12,8 +12,18 @@ repository itself was not modified** — everything here lives in this separate
 | `paper.tex` | **Authoritative IEEEtran LaTeX source** (IEEE conference two-column class). Compile on Overleaf or with `pdflatex paper.tex` (run twice for cross-references). |
 | `paper.pdf` | A rendered, two-column IEEE-style PDF (visual preview of `paper.tex`). |
 | `render_paper.py` | Script that regenerates `paper.pdf` (pure-Python reportlab; used because no TeX distribution is available in this sandbox). |
-| `BASE_PAPERS.md` | The curated **base & reference papers** the project builds on, with full citations and a note on how each maps to the project. |
+| `BASE_PAPERS.md` | The **base & reference papers** (research papers only, with verified DOIs) the project builds on, and a note on how each maps to the project. |
 | `README.md` | This file. |
+
+## Reference list policy
+
+The reference list contains **research papers only** — no model cards, dataset
+pages, or vendor web pages. Non-paper artifacts named in the text (ProtectAI's
+DeBERTa-v3 injection model, the Deepset `prompt-injections` dataset, Meta's
+Llama Prompt Guard 2) are named as proper nouns and cited through the research
+papers that document them. Every reference has a DOI that was verified to
+resolve against the publisher's record (Crossref / DataCite / ACL Anthology /
+arXiv) on 2026-09-11; each DOI appears in both `paper.tex` and the PDF.
 
 ## Before submitting
 

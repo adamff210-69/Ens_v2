@@ -204,22 +204,22 @@ story.append(H1("I. INTRODUCTION"))
 story.append(P(
     "Prompt injection—where an attacker smuggles instructions into the context "
     "window of an LLM to hijack its goal or exfiltrate data—is widely ranked as "
-    "the top risk for LLM applications [1]. The attack class spans direct "
-    "instruction overrides (“ignore your previous instructions”) [2], indirect "
-    "injection through retrieved or tool-supplied content [3], [4], and "
-    "jailbreaks that override safety alignment [5]. Because no single detector "
+    "a leading security risk for LLM applications [3]. The attack class spans direct "
+    "instruction overrides (“ignore your previous instructions”) [1], indirect "
+    "injection through retrieved or tool-supplied content [2], [3], and "
+    "jailbreaks that override safety alignment [4]. Because no single detector "
     "is robust to all of these, modern guardrail practice is defense in depth: "
     "a cheap, high-precision surface classifier screens inputs; a second, more "
     "expensive mechanism such as a hidden-state probe or an LLM-based judge "
     "re-examines the remainder; and output auditors check the response after "
-    "generation [6]–[11]."))
+    "generation [5]–[9]."))
 story.append(P(
     "Each layer of such a stack is usually developed, benchmarked, and reported "
     "<i>in isolation</i>, and the implicit expectation is that a layer with "
     "strong standalone metrics will strengthen the ensemble. In this paper we "
     "show that this expectation can fail in a precisely quantifiable way. We "
     "build and release a three-layer, fail-closed injection guard around "
-    "Qwen2.5-7B-Instruct [19], reproducible on two T4 GPUs, and evaluate it "
+    "Qwen2.5-7B-Instruct [16], reproducible on two T4 GPUs, and evaluate it "
     "end-to-end on a held-out injection corpus. The second layer—a logistic "
     "probe trained on the intermediate hidden states of the target LLM—achieves "
     "0.997 ROC-AUC and 0.783 recall <i>in isolation</i>. Yet when this probe is "
@@ -232,7 +232,7 @@ story.append(P(
 story.append(P(
     "This is an instance of a classic principle in cascade design: a cheap "
     "first stage in a cascade must have near-total recall, or every stage behind "
-    "it is starved of the very traffic it exists to catch [16]. Our contribution "
+    "it is starved of the very traffic it exists to catch [13]. Our contribution "
     "is not the discovery of this principle, but the demonstration that "
     "production-style LLM guardrail stacks violate it silently, together with a "
     "quantified cost of the violation and a concrete fix. Specifically, we "
@@ -266,37 +266,37 @@ story.append(P(
     "either the user instruction (direct injection) or the untrusted context "
     "(indirect injection), and seeks goal hijacking or system-prompt "
     "exfiltration. This matches the canonical formulations of Perez and Ribeiro "
-    "[2] and Greshake et al. [3], and the indirect-injection surface that "
-    "dominates current agentic deployments [1], [4]."))
+    "[1] and Greshake et al. [2], and the indirect-injection surface that "
+    "dominates current agentic deployments [2], [3]."))
 story.append(H2("B. Detection Defenses"))
 story.append(P(
     "Two families of detector dominate practice. <i>Surface prompt guards</i> "
     "are lightweight classifiers—typically fine-tuned DeBERTa-family "
-    "encoders—that score raw input text. Examples include ProtectAI’s DeBERTa-v3 "
-    "injection models [6], Deepset’s injection classifier [7], Meta’s Llama "
-    "Prompt Guard 2 [8], PIGuard [10], and the generative Llama Guard [9]. These "
+    "encoders—that score raw input text. Examples include prompt guard models "
+    "trained as binary classifiers, such as PIGuard [6] and InjecGuard [7], and "
+    "generative guards such as Llama Guard [5]. These "
     "models are fast and cheap but are documented to suffer <i>over-defense</i>: "
     "bias toward trigger words causes benign inputs stuffed with attack "
     "vocabulary to be misclassified, with accuracy dropping toward chance on "
-    "adversarial-benign sets such as NotInject [10]. We observe the same failure "
+    "adversarial-benign sets such as NotInject [6], [7]. We observe the same failure "
     "mode in our first layer, which motivates treating it as a high-precision "
     "but recall-limited stage."))
 story.append(P(
     "<i>Representation-level detectors</i> read the model’s internal activations "
     "rather than the surface string. Linear probes on intermediate hidden states "
-    "have a long lineage [15] and a growing body of recent work for injection "
+    "have a long lineage [12] and a growing body of recent work for injection "
     "and jailbreak detection: InstructDetector uses hidden states and gradients "
-    "to detect indirect instructions [11]; JBShield analyzes activated "
-    "toxic/jailbreak concepts in hidden representations [12]; and large-scale "
+    "to detect indirect instructions [8]; JBShield analyzes activated "
+    "toxic/jailbreak concepts in hidden representations [9]; and large-scale "
     "evaluations train activation probes across many corpora and argue for "
-    "leave-one-dataset-out evaluation [13], [14]. These methods are generally "
+    "leave-one-dataset-out evaluation [10], [11]. These methods are generally "
     "more robust to surface obfuscation than string-level guards, at the cost of "
     "a full forward pass of the target LLM."))
 story.append(H2("C. Cascades and Deferral"))
 story.append(P(
     "Ordering a cheap high-recall stage before an expensive high-precision stage "
-    "is the classic cascade pattern [16], generalized in the machine learning "
-    "literature as <i>learning to defer</i> [17]. The key invariant—established "
+    "is the classic cascade pattern [13], generalized in the machine learning "
+    "literature as <i>learning to defer</i> [14]. The key invariant—established "
     "decades ago and restated here because it is the mechanism of our central "
     "finding—is that no stage can detect an input that a prior stage refused to "
     "pass on. In Section VI-A we formalize this as an upper bound on ensemble "
@@ -343,7 +343,7 @@ story.append(caption("<b>Fig. 1.</b> The three-layer pipeline. L2 runs on every 
 story.append(H2("A. Layer 1 — Surface Classifier"))
 story.append(P(
     "L1 audits raw text with a fine-tuned ProtectAI/DeBERTa-v3-base-prompt-"
-    "injection-v2 classifier [6], [18]. Inputs longer than the encoder window "
+    "injection-v2 classifier [15]. Inputs longer than the encoder window "
     "are split into overlapping sliding windows with two production guards: an "
     "<i>overlap clamp</i> (overlap capped at a quarter of the window budget) and "
     "a <i>window cap</i> (at most 64 windows, always including the document "
@@ -352,7 +352,7 @@ story.append(P(
     "INJECTION at probability at least 0.5; a multi-window input requires either "
     "2 or more alert windows or a peak of at least 0.95, so one quoted attack "
     "inside a long benign document escalates rather than blocks. An optional "
-    "ensemble (e.g., adding PIGuard [10]) votes per window, diluting single-model "
+    "ensemble (e.g., adding PIGuard [6]) votes per window, diluting single-model "
     "quirks such as repetition-triggered false spikes."))
 story.append(H2("B. Layer 2 — Hidden-State Probe"))
 story.append(P(
@@ -393,9 +393,9 @@ story.append(H1("IV. EXPERIMENTAL SETUP"))
 story.append(H2("A. Data"))
 story.append(P(
     "Table II lists the corpora. The probe is trained on the <b>train</b> split "
-    "of Deepset’s prompt-injections dataset [7] (546 rows), augmented with 527 "
+    "of Deepset’s prompt-injections dataset (546 rows), augmented with 527 "
     "jailbreak positives from jailbreak-classification and 339 hard negatives "
-    "from NotInject [10]—benign text deliberately stuffed with attack trigger "
+    "from NotInject [6]—benign text deliberately stuffed with attack trigger "
     "words, the direct data-side antidote to over-defense. All evaluation "
     "numbers in this paper are computed on the <b>held-out test split</b> of "
     "prompt-injections (116 rows: 60 injections, 56 benign), which is never seen "
@@ -405,13 +405,13 @@ story.append(P(
 t2_data = [
     [Paragraph("<b>Corpus</b>", S_CELL_H), Paragraph("<b>Split</b>", S_CELL_H),
      Paragraph("<b>Rows</b>", S_CELL_H), Paragraph("<b>Semantics</b>", S_CELL_H)],
-    [Paragraph("deepset/prompt-injections [7]", S_CELL), Paragraph("train", S_CELL_C),
+    [Paragraph("deepset/prompt-injections", S_CELL), Paragraph("train", S_CELL_C),
      Paragraph("546", S_CELL_C), Paragraph("binary labels (203 positive)", S_CELL)],
-    [Paragraph("deepset/prompt-injections [7]", S_CELL), Paragraph("test", S_CELL_C),
+    [Paragraph("deepset/prompt-injections", S_CELL), Paragraph("test", S_CELL_C),
      Paragraph("116", S_CELL_C), Paragraph("held-out (60 inj. / 56 benign)", S_CELL)],
     [Paragraph("jailbreak-classification", S_CELL), Paragraph("train", S_CELL_C),
      Paragraph("527 pos.", S_CELL_C), Paragraph("labeled via “type” column", S_CELL)],
-    [Paragraph("NotInject [10]", S_CELL), Paragraph("3 splits", S_CELL_C),
+    [Paragraph("NotInject [6]", S_CELL), Paragraph("3 splits", S_CELL_C),
      Paragraph("339", S_CELL_C), Paragraph("benign + trigger words (hard negatives)", S_CELL)],
     [Paragraph("ChatGPT-Jailbreak-Prompts", S_CELL), Paragraph("train", S_CELL_C),
      Paragraph("79", S_CELL_C), Paragraph("all positive (cross-family)", S_CELL)],
@@ -554,7 +554,7 @@ story.append(P(
     "spots, not by L2’s quality. In our legacy configuration g = 1/39 (~0.026), "
     "so R ~ R1 regardless of R2—a probe with 0.997 AUC contributes a single "
     "catch because the gate inherits exactly the inputs L1 cannot see. This is "
-    "the cascade-recall bound in disguise [16], [17]: no downstream stage can "
+    "the cascade-recall bound in disguise [13], [14]: no downstream stage can "
     "detect what a prior stage refuses to pass on."))
 story.append(H2("B. Threats to Validity"))
 story.append(P(
@@ -566,9 +566,9 @@ story.append(P(
     "tuning; the released trainer calibrates on a validation slice for a "
     "defensible setting. (iii) We do not yet report leave-one-dataset-out "
     "generalization or adaptive adversaries (obfuscation, paraphrasing, "
-    "multi-turn), which the field increasingly requires [13], [14]; the released "
+    "multi-turn), which the field increasingly requires [10], [11]; the released "
     "benchmark harness supports these. (iv) The L1 choice (ProtectAI v2) is a "
-    "documented over-defense liability [10], and we observe its "
+    "documented over-defense liability [6], and we observe its "
     "repetition-triggered false spikes ourselves; the L1 ensemble and dual-key "
     "confirmation are mitigations, not eliminations. (v) The L3 self-judge "
     "consumes untrusted text and is therefore itself prompt-injectable; it is "
@@ -609,25 +609,22 @@ story.append(P(
 # ---- References ------------------------------------------------------------
 story.append(H1("REFERENCES"))
 refs = [
-    "OWASP Foundation, “OWASP Top 10 for Large Language Model Applications,” 2025. [Online]. Available: https://owasp.org/www-project-top-10-for-large-language-model-applications/",
-    "F. Perez and I. Ribeiro, “Ignore previous prompt: Attack techniques for language models,” in Proc. NeurIPS ML Safety Workshop, 2022, arXiv:2211.09527.",
-    "K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, and M. Fritz, “Not what you’ve signed up for: Compromising real-world LLM-integrated applications with indirect prompt injection,” in Proc. 16th ACM Workshop on Artificial Intelligence and Security (AISec), 2023, arXiv:2302.12173.",
-    "Y. Liu et al., “Prompt injection attack against LLM-integrated applications,” arXiv:2306.05499, 2024.",
-    "A. Zou et al., “Universal and transferable adversarial attacks on aligned language models,” arXiv:2307.15043, 2023.",
-    "ProtectAI, “deberta-v3-base-prompt-injection-v2,” Hugging Face model repository, 2024.",
-    "Deepset, “deepset/prompt-injections,” Hugging Face dataset repository, 2024.",
-    "Meta AI, “Llama Prompt Guard 2,” model card, 2025.",
-    "H. Inan et al., “Llama Guard: LLM-based input-output safeguard for human-AI conversations,” arXiv:2312.06674, 2023.",
-    "H. Li, X. Liu, N. Zhang, and C. Xiao, “PIGuard: Prompt injection guardrail via mitigating overdefense for free,” in Proc. ACL, 2025, pp. 30420–30437.",
-    "T. Wen et al., “Defending against indirect prompt injection by instruction detection,” in Findings of EMNLP, 2025, arXiv:2505.06311.",
-    "S. Zhang et al., “JBShield: Defending large language models from jailbreak attacks through activated concept analysis and manipulation,” in Proc. USENIX Security Symposium, 2025, arXiv:2502.07557.",
-    "M. Fomin, “When benchmarks lie: Evaluating malicious prompt classifiers under true distribution shift,” arXiv:2602.14161, 2026.",
-    "Y. Li, Z. Fan, and Z. Zhuang, “When AUC 0.998 is not enough: A candidate evaluation protocol for hidden-state probes of indirect prompt injection in multimodal computer-use agents,” arXiv:2606.22864, 2026.",
-    "G. Alain and Y. Bengio, “Understanding intermediate layers using linear classifier probes,” in Proc. ICLR Workshop Track, 2017, arXiv:1610.01644.",
-    "P. Viola and M. Jones, “Rapid object detection using a boosted cascade of simple features,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition (CVPR), 2001, pp. I-511–I-518.",
-    "D. Madras, T. Pitassi, and R. Zemel, “Predict responsibly: Improving fairness and accuracy by learning to defer,” in Proc. NeurIPS, 2018.",
-    "P. He, J. Gao, and W. Chen, “DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training with gradient-disentangled embedding sharing,” in Proc. ICLR, 2023, arXiv:2111.09543.",
-    "Qwen Team, Alibaba Group, “Qwen2.5 technical report,” arXiv:2412.15115, 2024.",
+    "F. Perez and I. Ribeiro, “Ignore previous prompt: Attack techniques for language models,” in Proc. NeurIPS ML Safety Workshop, 2022. doi: 10.48550/arXiv.2211.09527",
+    "K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, and M. Fritz, “Not what you’ve signed up for: Compromising real-world LLM-integrated applications with indirect prompt injection,” in Proc. 16th ACM Workshop on Artificial Intelligence and Security (AISec), 2023, pp. 79–90. doi: 10.1145/3605764.3623985",
+    "Y. Liu, G. Deng, Y. Li, K. Wang, Z. Wang, X. Wang, T. Zhang, Y. Liu, H. Wang, Y. Zheng, and Y. Liu, “Prompt injection attack against LLM-integrated applications,” arXiv preprint, 2024. doi: 10.48550/arXiv.2306.05499",
+    "A. Zou, Z. Wang, N. Carlini, M. Nasr, J. Z. Kolter, and M. Fredrikson, “Universal and transferable adversarial attacks on aligned language models,” arXiv preprint, 2023. doi: 10.48550/arXiv.2307.15043",
+    "H. Inan, K. Upasani, J. Chi, R. Rungta, K. Iyer, Y. Mao, M. Tontchev, Q. Hu, B. Fuller, D. Testuggine, and M. Khabsa, “Llama Guard: LLM-based input-output safeguard for human-AI conversations,” arXiv preprint, 2023. doi: 10.48550/arXiv.2312.06674",
+    "H. Li, X. Liu, N. Zhang, and C. Xiao, “PIGuard: Prompt injection guardrail via mitigating overdefense for free,” in Proc. 63rd Annual Meeting of the Association for Computational Linguistics (ACL), 2025, pp. 30420–30437. doi: 10.18653/v1/2025.acl-long.1468",
+    "H. Li, X. Liu, and C. Xiao, “InjecGuard: Benchmarking and mitigating over-defense in prompt injection guardrail models,” arXiv preprint, 2024. doi: 10.48550/arXiv.2410.22770",
+    "T. Wen, C. Wang, X. Yang, H. Tang, Y. Xie, L. Lyu, Z. Dou, and F. Wu, “Defending against indirect prompt injection by instruction detection,” in Findings of the Association for Computational Linguistics: EMNLP 2025, 2025, pp. 19472–19487. doi: 10.18653/v1/2025.findings-emnlp.1060",
+    "S. Zhang, Y. Zhai, K. Guo, H. Hu, S. Guo, Z. Fang, L. Zhao, C. Shen, C. Wang, and Q. Wang, “JBShield: Defending large language models from jailbreak attacks through activated concept analysis and manipulation,” in Proc. USENIX Security Symposium, 2025. doi: 10.48550/arXiv.2502.07557",
+    "M. Fomin, “When benchmarks lie: Evaluating malicious prompt classifiers under true distribution shift,” arXiv preprint, 2026. doi: 10.48550/arXiv.2602.14161",
+    "Y. Li, Z. Fan, and Z. Zhuang, “When AUC 0.998 is not enough: A candidate evaluation protocol for hidden-state probes of indirect prompt injection in multimodal computer-use agents,” arXiv preprint, 2026. doi: 10.48550/arXiv.2606.22864",
+    "G. Alain and Y. Bengio, “Understanding intermediate layers using linear classifier probes,” in Proc. ICLR Workshop Track, 2017. doi: 10.48550/arXiv.1610.01644",
+    "P. Viola and M. Jones, “Rapid object detection using a boosted cascade of simple features,” in Proc. IEEE Conf. Computer Vision and Pattern Recognition (CVPR), 2001, pp. I-511–I-518. doi: 10.1109/CVPR.2001.990517",
+    "D. Madras, T. Pitassi, and R. Zemel, “Predict responsibly: Improving fairness and accuracy by learning to defer,” in Proc. Advances in Neural Information Processing Systems (NeurIPS), 2018. doi: 10.48550/arXiv.1711.06664",
+    "P. He, J. Gao, and W. Chen, “DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training with gradient-disentangled embedding sharing,” in Proc. International Conference on Learning Representations (ICLR), 2023. doi: 10.48550/arXiv.2111.09543",
+    "Qwen Team, Alibaba Group, “Qwen2.5 technical report,” arXiv preprint, 2024. doi: 10.48550/arXiv.2412.15115",
 ]
 for i, r in enumerate(refs, 1):
     story.append(Paragraph("[%d]&nbsp;&nbsp;%s" % (i, r), S_REF))

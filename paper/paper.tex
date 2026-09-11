@@ -71,7 +71,7 @@ probes; guardrail evaluation; cascade classifiers
 
 Prompt injection---where an attacker smuggles instructions into the context
 window of an LLM to hijack its goal or exfiltrate data---is widely ranked as
-the top risk for LLM applications \cite{owasp}. The attack class spans direct
+the top risk for LLM applications \cite{liu2024}. The attack class spans direct
 instruction overrides (\emph{``ignore your previous instructions''})
 \cite{perez2022}, indirect injection through retrieved or tool-supplied content
 \cite{greshake2023,liu2024}, and jailbreaks that override safety alignment
@@ -80,7 +80,7 @@ guardrail practice is defense in depth: a cheap, high-precision surface
 classifier screens inputs; a second, more expensive mechanism such as a
 hidden-state probe or an LLM-based judge re-examines the remainder; and output
 auditors check the response after generation
-\cite{protectai,meta2025,inan2023,li2025,instructdetector,jbshield}.
+\cite{inan2023,li2025,injecguard,instructdetector,jbshield}.
 
 Each layer of such a stack is usually developed, benchmarked, and reported
 \emph{in isolation}, and the implicit expectation is that a layer with strong
@@ -143,7 +143,7 @@ sensitive system prompt. The adversary controls either the user instruction
 goal hijacking or system-prompt exfiltration. This matches the canonical
 formulations of Perez and Ribeiro \cite{perez2022} and Greshake et al.
 \cite{greshake2023}, and the indirect-injection surface that dominates current
-agentic deployments \cite{liu2024,owasp}.
+agentic deployments \cite{greshake2023,liu2024}.
 
 \subsection{Detection defenses}
 \label{sec:defenses}
@@ -151,13 +151,13 @@ Two families of detector dominate practice.
 
 \emph{Surface prompt guards} are lightweight classifiers---typically fine-tuned
 DeBERTa-family encoders---that score raw input text. Examples include
-ProtectAI's DeBERTa-v3 injection models \cite{protectai}, Deepset's injection
-classifier \cite{deepset}, Meta's Llama Prompt Guard~2 \cite{meta2025},
-PIGuard \cite{li2025}, and the generative Llama Guard \cite{inan2023}. These
+prompt guard models trained as binary classifiers, such as PIGuard
+\cite{li2025} and InjecGuard \cite{injecguard}, and generative guards such as
+Llama Guard \cite{inan2023}. These
 models are fast and cheap but are documented to suffer \emph{over-defense}:
 bias toward trigger words causes benign inputs stuffed with attack vocabulary to
 be misclassified, with accuracy dropping toward chance on adversarial-benign
-sets such as NotInject \cite{li2025}. We observe the same failure mode in our
+sets such as NotInject \cite{li2025,injecguard}. We observe the same failure mode in our
 first layer, which motivates treating it as a high-precision but
 recall-limited stage.
 
@@ -242,9 +242,8 @@ request, fail-closed.}
 
 \subsection{Layer 1 --- surface classifier}
 \label{sec:l1}
-L1 audits raw text with a fine-tuned
-ProtectAI/DeBERTa-v3-base-prompt-injection-v2 classifier
-\cite{protectai,he2023}. Inputs longer than the encoder window are split into
+L1 audits raw text with the ProtectAI
+DeBERTa-v3-base-prompt-injection-v2 classifier \cite{he2023}. Inputs longer than the encoder window are split into
 overlapping sliding windows with two production guards: an \emph{overlap clamp}
 (overlap capped at a quarter of the window budget) and a \emph{window cap}
 (at most $64$ windows, always including the document tail), so a long RAG
@@ -299,7 +298,7 @@ $\le$1024 tokens).
 \subsection{Data}
 \label{sec:data}
 Table~\ref{tab:data} lists the corpora. The probe is trained on the
-\textbf{train} split of Deepset's prompt-injections dataset \cite{deepset}
+\textbf{train} split of Deepset's prompt-injections dataset
 (546 rows), augmented with $527$ jailbreak positives from
 jailbreak-classification and $339$ hard negatives from NotInject
 \cite{li2025}---benign text deliberately stuffed with attack trigger words,
@@ -317,8 +316,8 @@ recall checks.
 \toprule
 \textbf{Corpus} & \textbf{Split} & \textbf{Rows} & \textbf{Semantics}\\
 \midrule
-deepset/prompt-injections \cite{deepset} & train & 546 & binary labels (203 positive)\\
-deepset/prompt-injections \cite{deepset} & test & 116 & held-out (60 inj.\ / 56 benign)\\
+deepset/prompt-injections & train & 546 & binary labels (203 positive)\\
+deepset/prompt-injections & test & 116 & held-out (60 inj.\ / 56 benign)\\
 jailbreak-classification & train & 527 pos.\ & labeled via \texttt{type} column\\
 NotInject \cite{li2025} & 3 splits & 339 & benign + trigger words (hard negatives)\\
 ChatGPT-Jailbreak-Prompts & train & 79 & all positive (cross-family)\\
@@ -525,97 +524,93 @@ measured.
 % References (IEEE numbered style)
 % =============================================================================
 \begin{thebibliography}{99}
-\bibitem{owasp}
-OWASP Foundation, ``OWASP Top 10 for Large Language Model Applications,''
-2025. [Online]. Available: \url{https://owasp.org/www-project-top-10-for-large-language-model-applications/}
-
 \bibitem{perez2022}
 F. Perez and I. Ribeiro, ``Ignore previous prompt: Attack techniques for
 language models,'' in \emph{Proc. NeurIPS ML Safety Workshop}, 2022,
-arXiv:2211.09527.
+doi: 10.48550/arXiv.2211.09527.
 
 \bibitem{greshake2023}
 K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, and M. Fritz,
 ``Not what you've signed up for: Compromising real-world LLM-integrated
 applications with indirect prompt injection,'' in \emph{Proc. 16th ACM
-Workshop on Artificial Intelligence and Security (AISec)}, 2023,
-arXiv:2302.12173.
+Workshop on Artificial Intelligence and Security (AISec)}, 2023, pp. 79--90,
+doi: 10.1145/3605764.3623985.
 
 \bibitem{liu2024}
 Y. Liu, G. Deng, Y. Li, K. Wang, Z. Wang, X. Wang, T. Zhang, Y. Liu, H. Wang,
 Y. Zheng, and Y. Liu, ``Prompt injection attack against LLM-integrated
-applications,'' arXiv:2306.05499, 2024.
+applications,'' arXiv preprint, 2024, doi: 10.48550/arXiv.2306.05499.
 
 \bibitem{zou2023}
 A. Zou, Z. Wang, N. Carlini, M. Nasr, J. Z. Kolter, and M. Fredrikson,
 ``Universal and transferable adversarial attacks on aligned language models,''
-arXiv:2307.15043, 2023.
-
-\bibitem{protectai}
-ProtectAI, ``deberta-v3-base-prompt-injection-v2,'' Hugging Face model
-repository, 2024. [Online]. Available:
-\url{https://huggingface.co/ProtectAI/deberta-v3-base-prompt-injection-v2}
-
-\bibitem{deepset}
-Deepset, ``deepset/prompt-injections,'' Hugging Face dataset repository, 2024.
-[Online]. Available: \url{https://huggingface.co/datasets/deepset/prompt-injections}
-
-\bibitem{meta2025}
-Meta AI, ``Llama Prompt Guard 2,'' model card, 2025. [Online]. Available:
-\url{https://developer.meta.com/ai/docs/model-cards-and-prompt-formats/prompt-guard/}
+arXiv preprint, 2023, doi: 10.48550/arXiv.2307.15043.
 
 \bibitem{inan2023}
 H. Inan, K. Upasani, J. Chi, R. Rungta, K. Iyer, Y. Mao, M. Tontchev, Q. Hu,
 B. Fuller, D. Testuggine, and M. Khabsa, ``Llama Guard: LLM-based input-output
-safeguard for human-AI conversations,'' arXiv:2312.06674, 2023.
+safeguard for human-AI conversations,'' arXiv preprint, 2023,
+doi: 10.48550/arXiv.2312.06674.
 
 \bibitem{li2025}
 H. Li, X. Liu, N. Zhang, and C. Xiao, ``PIGuard: Prompt injection guardrail
 via mitigating overdefense for free,'' in \emph{Proc. 63rd Annual Meeting of
-the Association for Computational Linguistics (ACL)}, 2025, pp. 30420--30437.
+the Association for Computational Linguistics (ACL)}, 2025, pp. 30420--30437,
+doi: 10.18653/v1/2025.acl-long.1468.
+
+\bibitem{injecguard}
+H. Li, X. Liu, and C. Xiao, ``InjecGuard: Benchmarking and mitigating
+over-defense in prompt injection guardrail models,'' arXiv preprint, 2024,
+doi: 10.48550/arXiv.2410.22770.
 
 \bibitem{instructdetector}
 T. Wen, C. Wang, X. Yang, H. Tang, Y. Xie, L. Lyu, Z. Dou, and F. Wu,
 ``Defending against indirect prompt injection by instruction detection,'' in
-\emph{Findings of EMNLP}, 2025, arXiv:2505.06311.
+\emph{Findings of the Association for Computational Linguistics: EMNLP 2025},
+2025, pp. 19472--19487, doi: 10.18653/v1/2025.findings-emnlp.1060.
 
 \bibitem{jbshield}
-S. Zhang, Y. Wang, W. Li, et al., ``JBShield: Defending large language models
-from jailbreak attacks through activated concept analysis and manipulation,''
-in \emph{Proc. USENIX Security Symposium}, 2025, arXiv:2502.07557.
+S. Zhang, Y. Zhai, K. Guo, H. Hu, S. Guo, Z. Fang, L. Zhao, C. Shen, C. Wang,
+and Q. Wang, ``JBShield: Defending large language models from jailbreak attacks
+through activated concept analysis and manipulation,'' in \emph{Proc. USENIX
+Security Symposium}, 2025, doi: 10.48550/arXiv.2502.07557.
 
 \bibitem{fomin2026}
 M. Fomin, ``When benchmarks lie: Evaluating malicious prompt classifiers under
-true distribution shift,'' arXiv:2602.14161, 2026.
+true distribution shift,'' arXiv preprint, 2026,
+doi: 10.48550/arXiv.2602.14161.
 
 \bibitem{auc2026}
 Y. Li, Z. Fan, and Z. Zhuang, ``When AUC 0.998 is not enough: A candidate
 evaluation protocol for hidden-state probes of indirect prompt injection in
-multimodal computer-use agents,'' arXiv:2606.22864, 2026.
+multimodal computer-use agents,'' arXiv preprint, 2026,
+doi: 10.48550/arXiv.2606.22864.
 
 \bibitem{alain2016}
 G. Alain and Y. Bengio, ``Understanding intermediate layers using linear
 classifier probes,'' in \emph{Proc. ICLR Workshop Track}, 2017,
-arXiv:1610.01644.
+doi: 10.48550/arXiv.1610.01644.
 
 \bibitem{viola2001}
 P. Viola and M. Jones, ``Rapid object detection using a boosted cascade of
 simple features,'' in \emph{Proc. IEEE Conf. Computer Vision and Pattern
-Recognition (CVPR)}, 2001, pp. I-511--I-518.
+Recognition (CVPR)}, 2001, pp. I-511--I-518, doi: 10.1109/CVPR.2001.990517.
 
 \bibitem{madras2018}
 D. Madras, T. Pitassi, and R. Zemel, ``Predict responsibly: Improving fairness
 and accuracy by learning to defer,'' in \emph{Proc. Advances in Neural
-Information Processing Systems (NeurIPS)}, 2018.
+Information Processing Systems (NeurIPS)}, 2018,
+doi: 10.48550/arXiv.1711.06664.
 
 \bibitem{he2023}
 P. He, J. Gao, and W. Chen, ``DeBERTaV3: Improving DeBERTa using
 ELECTRA-style pre-training with gradient-disentangled embedding sharing,'' in
 \emph{Proc. International Conference on Learning Representations (ICLR)}, 2023,
-arXiv:2111.09543.
+doi: 10.48550/arXiv.2111.09543.
 
 \bibitem{qwen25}
-Qwen Team, Alibaba Group, ``Qwen2.5 technical report,'' arXiv:2412.15115, 2024.
+Qwen Team, Alibaba Group, ``Qwen2.5 technical report,'' arXiv preprint, 2024,
+doi: 10.48550/arXiv.2412.15115.
 \end{thebibliography}
 
 \end{document}
