@@ -29,13 +29,29 @@ arXiv) on 2026-09-11; each DOI appears in both `paper.tex` and the PDF.
 
 1. **Replace the placeholder author block** in `paper.tex` (title/author/email
    section near the top) with real names, affiliations, and e-mail addresses.
-2. **Choose the target IEEE conference** and adjust length if needed (the draft
-   is ~4 pages, two-column, which fits most IEEE conference short/regular
-   tracks).
-3. Re-verify the numbers against a fresh run of the repository's
+2. **Replace the two formatting placeholders** in `render_paper.py`: the
+   conference banner line `2026 IEEE International Conference on (Conference
+   Name)` and the first-page copyright notice `979-8-XXXX-XXXX-X/26/$31.00
+   ©2026 IEEE` (the publisher assigns the real copyright string at acceptance).
+3. **Choose the target IEEE conference** and adjust length if needed (the draft
+   is ~5 pages, two-column, which fits most IEEE conference tracks).
+4. Re-verify the numbers against a fresh run of the repository's
    `evaluate_end_to_end.py` / `benchmark.py` before camera-ready, since the
    figures in the paper are the ones recorded in `PROJECT_STATUS.md` /
    `README.md` (held-out `deepset/prompt-injections` test split).
+
+## IEEE format notes
+
+- `paper.tex` uses the official `IEEEtran` conference class, which natively
+  produces the standard IEEE conference layout (full-width title/author block,
+  `Abstract—` and `Index Terms—`, Roman-numeral small-caps section headings,
+  two-column body, numbered references).
+- `paper.pdf` is a visual rendering of the same layout generated with
+  reportlab (no TeX in this sandbox): centered bold title, author block with
+  affiliation superscripts, `Abstract—`/`Index Terms—` labels, centered
+  uppercase section headings, uppercase table captions above each table
+  (`TABLE I`, `TABLE II`, …), `Fig. 1.` caption below the figure, and a
+  first-page IEEE copyright notice.
 
 ## How to compile the LaTeX
 

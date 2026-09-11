@@ -41,39 +41,45 @@ GREY = HexColor("#f2f2f2")
 # Styles
 # ----------------------------------------------------------------------------
 def st(name, **kw):
-    base = dict(fontName="Times-Roman", fontSize=9.5, leading=11.8,
-                alignment=TA_JUSTIFY, spaceAfter=4)
+    base = dict(fontName="Times-Roman", fontSize=10, leading=12.2,
+                alignment=TA_JUSTIFY, spaceAfter=5)
     base.update(kw)
     return ParagraphStyle(name, **base)
 
-S_TITLE   = st("title", fontName="Times-Bold", fontSize=15, leading=17,
+S_BANNER  = st("banner", fontSize=8, leading=9.5, alignment=TA_CENTER,
+               textColor=HexColor("#444444"), spaceAfter=2)
+S_TITLE   = st("title", fontName="Times-Bold", fontSize=17, leading=19.5,
                alignment=TA_CENTER, spaceAfter=4)
-S_AUTHORS = st("authors", fontSize=9.5, leading=11.5, alignment=TA_CENTER,
+S_AUTHORS = st("authors", fontSize=11, leading=13, alignment=TA_CENTER,
                spaceAfter=2)
-S_ABSTRACT= st("abstract", fontSize=8.4, leading=10.4, spaceAfter=5)
-S_KEYWORDS= st("keywords", fontSize=8.4, leading=10.4, spaceAfter=6)
-S_H1      = st("h1", fontName="Times-Bold", fontSize=9.8, leading=11.5,
-               spaceBefore=7, spaceAfter=3)
-S_H2      = st("h2", fontName="Times-BoldItalic", fontSize=9.5, leading=11.5,
-               spaceBefore=5, spaceAfter=2)
-S_CAP     = st("cap", fontSize=7.8, leading=9.2, alignment=TA_CENTER,
-               spaceBefore=4, spaceAfter=6)
-S_CELL    = st("cell", fontSize=7.6, leading=9.0, alignment=TA_LEFT,
-               spaceAfter=0)
-S_CELL_C  = st("cellc", fontSize=7.6, leading=9.0, alignment=TA_CENTER,
-               spaceAfter=0)
-S_CELL_H  = st("cellh", fontName="Times-Bold", fontSize=7.6, leading=9.0,
+S_AFFIL   = st("affil", fontName="Times-Italic", fontSize=10, leading=12,
                alignment=TA_CENTER, spaceAfter=0)
-S_REF     = st("ref", fontSize=8.0, leading=9.8, leftIndent=14,
-               firstLineIndent=-14, spaceAfter=2)
-S_EQ      = st("eq", fontName="Times-Italic", fontSize=9.5, leading=12,
+S_EMAIL   = st("email", fontSize=9.5, leading=11.5, alignment=TA_CENTER,
+               spaceAfter=3)
+S_ABSTRACT= st("abstract", fontSize=9, leading=11, spaceAfter=5)
+S_KEYWORDS= st("keywords", fontSize=9, leading=11, spaceAfter=6)
+S_H1      = st("h1", fontName="Times-Bold", fontSize=9.8, leading=11.5,
+               alignment=TA_CENTER, spaceBefore=9, spaceAfter=4)
+S_H2      = st("h2", fontName="Times-Roman", fontSize=9.6, leading=11.5,
+               spaceBefore=6, spaceAfter=3)
+S_CAP     = st("cap", fontSize=8, leading=9.6, alignment=TA_CENTER,
+               spaceBefore=3, spaceAfter=5)
+S_CELL    = st("cell", fontSize=8, leading=9.4, alignment=TA_LEFT,
+               spaceAfter=0)
+S_CELL_C  = st("cellc", fontSize=8, leading=9.4, alignment=TA_CENTER,
+               spaceAfter=0)
+S_CELL_H  = st("cellh", fontName="Times-Bold", fontSize=8, leading=9.4,
+               alignment=TA_CENTER, spaceAfter=0)
+S_REF     = st("ref", fontSize=8, leading=9.6, leftIndent=14,
+               firstLineIndent=-14, spaceAfter=2.5)
+S_EQ      = st("eq", fontName="Times-Italic", fontSize=10, leading=12,
                alignment=TA_CENTER, spaceBefore=3, spaceAfter=4)
 
 def P(text, style=None):
     return Paragraph(text, style or S_ABSTRACT)
 
-def H1(t): return Paragraph(t, S_H1)
-def H2(t): return Paragraph(t, S_H2)
+def H1(t): return Paragraph(t.upper(), S_H1)
+def H2(t): return Paragraph(t.upper(), S_H2)
 
 # ----------------------------------------------------------------------------
 # Figure (pipeline diagram)
@@ -159,19 +165,22 @@ def caption(text):
 story = []
 
 # ---- Title band ------------------------------------------------------------
+story.append(Paragraph("2026 IEEE International Conference on "
+                       "(Conference Name)", S_BANNER))
 story.append(Paragraph("Guardrail Cascades Do Not Compose: Measuring "
                        "Routing-Induced Starvation in a Three-Layer "
                        "Prompt-Injection Defense", S_TITLE))
-story.append(Paragraph("First A. Author and Second B. Author<br/>"
-                       "<i>Department of Computer Science, Example University, "
-                       "City, Country</i><br/>"
-                       "{first.author, second.author}@example.edu", S_AUTHORS))
+story.append(Paragraph("First A. Author<super>1</super> and "
+                       "Second B. Author<super>1</super>", S_AUTHORS))
+story.append(Paragraph("<super>1</super>Department of Computer Science, "
+                       "Example University, City, Country", S_AFFIL))
+story.append(Paragraph("{first.author, second.author}@example.edu", S_EMAIL))
 story.append(HRFlowable(width="100%", thickness=0.8, color=black,
                         spaceBefore=1, spaceAfter=3))
 
 # ---- Abstract / keywords ---------------------------------------------------
 story.append(Paragraph(
-    "<b><i>Abstract</i></b>—Prompt injection and jailbreak attacks remain the "
+    "<b>Abstract</b>—Prompt injection and jailbreak attacks remain the "
     "dominant failure mode for deployed large language model (LLM) systems, and "
     "practitioners increasingly stack several detectors—a fast surface "
     "classifier, a hidden-state probe, and an output auditor—to defend in depth. "
@@ -330,8 +339,8 @@ t1_data = [
      Paragraph("Post-generation output audit (exfiltration, compromise)", S_CELL),
      Paragraph("reuses the 7B", S_CELL_C)],
 ]
+story.append(caption("<b>TABLE I</b>  THE THREE DEFENSIVE LAYERS OF THE PIPELINE"))
 story.append(booktabs_table(t1_data, [26, 70, 102, 46]))
-story.append(caption("<b>TABLE I.</b> The three defensive layers of the pipeline."))
 
 # Figure 1
 story.append(PipelineFig(COL_W - 4))
@@ -416,9 +425,9 @@ t2_data = [
     [Paragraph("ChatGPT-Jailbreak-Prompts", S_CELL), Paragraph("train", S_CELL_C),
      Paragraph("79", S_CELL_C), Paragraph("all positive (cross-family)", S_CELL)],
 ]
+story.append(caption("<b>TABLE II</b>  CORPORA USED FOR TRAINING AND HELD-OUT "
+                     "EVALUATION"))
 story.append(booktabs_table(t2_data, [96, 40, 42, 66]))
-story.append(caption("<b>TABLE II.</b> Corpora used for training and held-out "
-                     "evaluation."))
 
 story.append(H2("B. Training and Calibration Methodology"))
 story.append(P(
@@ -492,9 +501,9 @@ t3_data = [
      Paragraph("<b>0.900 (54/60)</b>", S_CELL_C), Paragraph("<b>0.018 (1/56)</b>", S_CELL_C),
      Paragraph("<b>0.940</b>", S_CELL_C)],
 ]
+story.append(caption("<b>TABLE III</b>  END-TO-END GATE-POLICY COMPARISON ON THE "
+                     "HELD-OUT TEST SPLIT (60 INJECTIONS, 56 BENIGN)"))
 story.append(booktabs_table(t3_data, [98, 40, 46, 42, 26]))
-story.append(caption("<b>TABLE III.</b> End-to-end gate-policy comparison on the "
-                     "held-out test split (60 injections, 56 benign)."))
 
 story.append(P(
     "Making L2 always-on (Policy B) removes the gate and lets the probe see "
@@ -527,9 +536,9 @@ t4_data = [
     [Paragraph("0.50", S_CELL), Paragraph("0.950 (57/60)", S_CELL_C),
      Paragraph("0.018 (1/56)", S_CELL_C), Paragraph("0.966", S_CELL_C)],
 ]
+story.append(caption("<b>TABLE IV</b>  THRESHOLD SWEEP UNDER ALWAYS-ON ROUTING "
+                     "(HELD-OUT SPLIT)"))
 story.append(booktabs_table(t4_data, [84, 72, 56, 40]))
-story.append(caption("<b>TABLE IV.</b> Threshold sweep under always-on routing "
-                     "(held-out split)."))
 
 story.append(H2("D. Cost of the Fix"))
 story.append(P(
@@ -636,6 +645,11 @@ def on_page(canv, doc):
     canv.saveState()
     canv.setFont("Times-Roman", 8)
     canv.drawCentredString(PAGE_W/2.0, MARGIN/2.0, str(canv.getPageNumber()))
+    if canv.getPageNumber() == 1:
+        # IEEE-style first-page copyright notice (placeholder — replace).
+        canv.setFont("Times-Roman", 7)
+        canv.drawString(MARGIN, MARGIN/2.0,
+                        "979-8-XXXX-XXXX-X/26/$31.00 \u00a92026 IEEE")
     canv.restoreState()
 
 frame_first_cols = [
