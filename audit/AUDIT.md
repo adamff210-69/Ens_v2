@@ -370,7 +370,7 @@ validation (`TEST_RESULTS.md` §6), F-10 generation timeouts, F-13/F-14.
 The first real-hardware run validated F-11 verify-then-write on Kaggle,
 the 67-test suite on T4, and D-1 pinning in the live HTTP path
 (`/resolve/<40-hex-sha>/`). The run review surfaced four operational
-hazards, fixed in commit `<R6-COMMIT>`:
+hazards, fixed in commit `cbc18d89e1a4ee524d4c8707bce67d7624b29352`:
 
 1. **Stale-directory clone.** The run cloned over an existing
    `/kaggle/working/Ens_v2`, leaving untracked leftovers. INSTALL.md Route A

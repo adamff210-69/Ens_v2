@@ -24,7 +24,7 @@ the audited code:
     !rm -rf Ens_v2                       # start CLEAN: an existing dir keeps
     !git clone -q https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout -q b7f36c2f36df0adb87d4b2251f140e255aa3451c   # audited artifact
+    !git checkout -q cbc18d89e1a4ee524d4c8707bce67d7624b29352   # audited artifact
     !git status --porcelain              # MUST print nothing (no stale files)
     !python verify.py
     # confirm you import THIS copy, not a stale one earlier on sys.path:
