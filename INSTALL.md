@@ -29,10 +29,20 @@ the audited code:
                                                             # F-12, D-1 incl.)
     !python verify.py
 
-Which verifies each embedded payload against a pinned SHA-256 **before
-writing anything**, extracts the four runtime files only if all digests
-match (then re-hashes them from disk), and runs the 48-test offline suite.
-A mismatch exits non-zero and leaves your local files untouched.
+Which performs two distinct safety checks **before writing anything**:
+
+1. **Bundle integrity** — each embedded payload is verified against a pinned
+   SHA-256; a corrupt bundle exits `2` and writes nothing.
+2. **Local-edit protection** — every destination file that already exists and
+   DIFFERS from the bundle is refused: the installer exits `4` and writes
+   nothing (a valid bundle would otherwise silently overwrite your local
+   edits). Identical files are a no-op. Re-run with `python verify.py --force`
+   to overwrite differing files explicitly.
+
+Only if both checks pass does it extract (re-hashing each file from disk) and
+run the 67-test offline suite. Exit codes: `0` ok · `2` corrupt bundle ·
+`3` post-write mismatch · `4` local conflict (nothing written) · `64` bad
+CLI usage.
 
 If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 
@@ -43,7 +53,7 @@ If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 Because it is fetched from the pinned repository — not an anonymous paste —
 you can audit it before uploading.
 
-1. Download **`verify.py`** (~63 KB) from the repo at the pinned commit:
+1. Download **`verify.py`** (~74 KB) from the repo at the pinned commit:
    `https://github.com/adamff210-69/Ens_v2/blob/<commit>/verify.py`
    (raw link -> right-click -> Save), or `git clone` locally first.
 2. Kaggle notebook → right sidebar → **Data → Upload** → drop it in (it

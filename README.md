@@ -99,7 +99,13 @@ Held-out `deepset/prompt-injections` test split, L1 = ProtectAI DeBERTa v2, prob
 > routed to L2 for dual-key confirmation, so such rows now count as
 > L2/dual-key attributions instead of L1 catches. The rows above were measured
 > before that change; re-run `evaluate_end_to_end.py` / `benchmark.py` before
-> publishing updated gate numbers.
+> publishing updated gate numbers. **Do not assume TPR/FPR stay the same**:
+> the final decision can flip either way — e.g. a row with `p1 = 0.88`
+> (single window) and `L2 = 0.10 < thr 0.90` was BLOCKED by the legacy
+> single-chunk shortcut but is now ALLOWED by the corrected evaluator (a
+> false positive removed if the row is benign, a recall loss if it is
+> malicious). Recompute both final metrics and per-layer attribution — and
+> rows the old evaluator never sent to L2 need their L2 scores computed too.
 
 Fixing the gate took end-to-end recall from 0.367 to 0.833 with zero false
 positives: L2 now contributes 29+ catches that L1 misses (union 50 vs 21 from

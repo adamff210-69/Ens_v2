@@ -32,7 +32,6 @@ import argparse
 import csv
 
 import numpy as np
-from datasets import load_dataset
 
 from pipeline import (DATASET_REVISIONS, InjectionDetectionPipeline,
                       VRAMManager, l1_hard_block, pinned_revision)
@@ -73,6 +72,9 @@ def main() -> None:
                   else artifact_thr)
     print(f"Artifact probe threshold: {artifact_thr:.4f} | active: {active_thr:.4f}")
     print(f"L1 block >= {args.l1_block}")
+
+    # Heavy dataset import stays in the CLI execution path (audit review §3).
+    from datasets import load_dataset
 
     # ------------------------------------------------------------------
     test_split = load_dataset(

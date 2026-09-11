@@ -153,6 +153,7 @@ branch `arena/01a08bcc-ens-v2`:
 | Batch A (F-05, F-06, F-11, F-12) | phantom benchmark row, `train()` docstring, verify-then-write installer, threshold validation | FIXED + regression-locked |
 | Batch B (D-2/F-08, F-07, D-1) | `require_probe=True` default (loud failure w/o probe), prefix-probe gap documented in README, HF revision pins for all models/datasets | FIXED + regression-locked |
 | Batch C (offline parts) | F-09 recalibration runbook in README, gate-table attribution caveat, hardware checklist reference | DOCUMENTED |
+| Review R5 | Installer local-edit protection (conflict scan + `--force`), F-02 reject-not-clamp votes, F-03 actual-runtime fingerprints, F-12 ±inf/type coverage + artifact-threshold gate, behavior-based F-05 tests, honest per-environment reporting (`audit/RELEASE_NOTES.md`) | FIXED + regression-locked (suite 67/67) |
 
 Still open:
 - **F-09 training run**: the deployed `probe_qwen_layer20.joblib` threshold

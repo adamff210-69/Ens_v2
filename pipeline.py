@@ -36,6 +36,7 @@ __version__ = "2.0.0"
 
 import gc
 import logging
+import math
 import os
 import re
 import secrets
@@ -314,7 +315,11 @@ class TextClassifierLayer:
             top_k=None,
         )
         logger.info("L1 guard loaded: %s (labels=%s)", name, sorted(labels))
-        return {"name": name, "pipe": clf, "labels": labels}
+        return {"name": name, "pipe": clf, "labels": labels,
+                # Full class contract of the checkpoint, needed to decide when
+                # a benign-complement vote is sound (audit review §4A).
+                "known_labels": {str(v).lower() for v in id2label.values()},
+                "binary": len(id2label) == 2}
 
     def _init_model(self) -> None:
         last_err: Optional[Exception] = None
@@ -387,30 +392,67 @@ class TextClassifierLayer:
             chunks.append(self.tokenizer.decode(ids[i:i + budget], skip_special_tokens=True))
         return chunks
 
+    def _guard_vote(self, clf_entry: Dict[str, Any], chunk: str) -> float:
+        """One guard's injection probability for one chunk.
+
+        Raises on any output that cannot be interpreted unambiguously — an
+        unknown label or a multi-row result without an injection row is a
+        GUARD FAILURE, not a silent benign vote (audit review §4A). The
+        benign-complement is applied only under a VERIFIED binary contract:
+        exactly two known classes and the returned row is the known
+        non-injection class. A single returned label does not by itself
+        prove "benign".
+        """
+        results = clf_entry["pipe"](chunk)
+        if isinstance(results, list) and results and isinstance(results[0], list):
+            results = results[0]
+        elif isinstance(results, dict):
+            results = [results]
+        if not results:
+            raise ValueError("guard returned no scores")
+
+        targets = {lbl.lower() for lbl in clf_entry["labels"]}
+        known = clf_entry.get("known_labels") or set()
+        binary = bool(clf_entry.get("binary", False))
+
+        for row in results:
+            label = str(row["label"]).lower()
+            if label in targets:
+                return float(row["score"])
+            if known and label not in known:
+                raise ValueError(
+                    f"guard returned unknown label {row['label']!r} "
+                    f"(known classes: {sorted(known)})")
+
+        # No injection-label row was returned.
+        if len(results) == 1:
+            label = str(results[0]["label"]).lower()
+            if binary and known and label in known and label not in targets:
+                # Verified binary contract: the single returned row is the
+                # checkpoint's other (benign) class — complementing is sound.
+                return 1.0 - float(results[0]["score"])
+            raise ValueError(
+                f"single-row result {results[0]['label']!r} cannot be "
+                "complemented without a verified binary class mapping")
+        raise ValueError(
+            "no injection-label row in multi-row result "
+            "(label resolution mismatch — treated as guard failure)")
+
     def _injection_prob(self, chunk: str) -> Tuple[float, List[float]]:
         """Per-guard injection probabilities for one chunk -> (max, votes)."""
         votes: List[float] = []
         guard_errors: List[str] = []
 
         for clf_entry in self.classifiers:
-            prob = 0.0
             try:
-                results = clf_entry["pipe"](chunk)
-                if isinstance(results, list) and results and isinstance(results[0], list):
-                    results = results[0]
-                elif isinstance(results, dict):
-                    results = [results]
-
-                targets = {lbl.lower() for lbl in clf_entry["labels"]}
-                for row in results:
-                    if str(row["label"]).lower() in targets:
-                        prob = float(row["score"])
-                        break
-                else:
-                    # Binary fallback: complement of the single returned label
-                    if len(results) == 1:
-                        prob = 1.0 - float(results[0]["score"])
-                votes.append(prob)
+                prob = self._guard_vote(clf_entry, chunk)
+                # Reject — never clamp — malformed model output (audit review
+                # §4A): a non-finite or out-of-range score must count as a
+                # guard failure, not be converted into a benign-looking
+                # number like 0.0.
+                if not math.isfinite(prob) or not (0.0 <= prob <= 1.0):
+                    raise ValueError(f"invalid guard probability {prob!r}")
+                votes.append(float(prob))
             except Exception as e:  # noqa: BLE001
                 logger.error("L1 guard %s failed on chunk: %s", clf_entry["name"], e)
                 guard_errors.append(f"{clf_entry['name']}: {e}")
@@ -473,6 +515,50 @@ class TextClassifierLayer:
             sum(guard_flags), decision,
         )
         return decision, max_p, metadata
+
+
+# ---------------------------------------------------------------------------
+# Fingerprint descriptors — must describe the ACTUAL extraction runtime,
+# not hardware preferences (audit review §4B).
+# ---------------------------------------------------------------------------
+def _describe_quantization(model) -> str:
+    """The quantization mode the model was ACTUALLY loaded with.
+
+    Returns 'none', '4bit-<quant_type>', '8bit' or 'other:<method>' — a
+    boolean "has quantization_config" is too coarse to establish that the
+    model runs in 4-bit specifically.
+    """
+    qcfg = getattr(getattr(model, "config", None), "quantization_config", None)
+    if qcfg is None:
+        return "none"
+
+    def _get(key, default=None):
+        if isinstance(qcfg, dict):
+            return qcfg.get(key, default)
+        return getattr(qcfg, key, default)
+
+    if _get("load_in_4bit"):
+        return f"4bit-{_get('bnb_4bit_quant_type') or 'unknown'}"
+    if _get("load_in_8bit"):
+        return "8bit"
+    return f"other:{_get('quant_method') or 'unknown'}"
+
+
+def _runtime_compute_dtype(model, bnb_config) -> str:
+    """The dtype extraction actually computes in.
+
+    For bitsandbytes loads this is the configured compute dtype; otherwise
+    the loaded parameter dtype. This is what hidden states come out as —
+    NOT the hardware-policy recommendation of VRAMManager.get_optimal_dtype().
+    """
+    if bnb_config is not None:
+        ce = getattr(bnb_config, "bnb_4bit_compute_dtype", None)
+        if ce is not None:
+            return str(ce)
+    try:
+        return str(next(iter(model.parameters())).dtype)
+    except Exception:  # noqa: BLE001 — stubs/models without parameters
+        return "unknown"
 
 
 # ===========================================================================
@@ -576,6 +662,14 @@ class HiddenStateProbeLayer:
         )
         self.model.eval()
 
+        # Fingerprint ground truth, captured from the ACTUAL loaded model
+        # (audit review §4B): quantization mode + compute dtype are what the
+        # hidden-state extraction really runs under, not a policy guess.
+        self.model_revision = revision
+        self._quantization_mode = _describe_quantization(self.model)
+        self._extraction_dtype = _runtime_compute_dtype(self.model, bnb)
+        self._extraction_dtype_observed = None   # set from first forward pass
+
         # Layer bounds check (fail fast, never index OOB at inference)
         n_layers = int(self.model.config.num_hidden_layers)
         bad = [l for l in self.layers if not (0 <= l < n_layers)]
@@ -621,6 +715,10 @@ class HiddenStateProbeLayer:
         pooled_parts = []
         for layer_idx in self.layers:
             hs = out.hidden_states[layer_idx][0]                   # [seq, dim]
+            if self._extraction_dtype_observed is None:
+                # Strongest fingerprint evidence: the tensor dtype the model
+                # actually produced (overrides the init-time deduction).
+                self._extraction_dtype_observed = str(hs.dtype)
             mask = enc["attention_mask"][0].to(hs.device).unsqueeze(-1).float()
 
             if self.pooling == "last":
@@ -811,8 +909,26 @@ class HiddenStateProbeLayer:
         return self
 
     # ------------------------------------------------------------------
+    def _current_extraction_dtype(self) -> str:
+        """Observed tensor dtype if a forward pass ran, else the init-time
+        deduction from the loaded model (audit review §4B)."""
+        return (getattr(self, "_extraction_dtype_observed", None)
+                or getattr(self, "_extraction_dtype", None)
+                or "unknown")
+
+    def _current_quantization_mode(self) -> str:
+        return (getattr(self, "_quantization_mode", None)
+                or _describe_quantization(getattr(self, "model", None)))
+
     def save(self, filepath: str) -> None:
-        """Persist probe weights + full fingerprint metadata."""
+        """Persist probe weights + full fingerprint metadata.
+
+        The fingerprint records the ACTUAL extraction runtime (audit review
+        §4B): quantization mode and compute dtype as loaded/observed, the
+        pinned model revision the weights came from, layer order, pooling
+        and max_length. Legacy keys (compute_dtype/quantized_4bit) are kept
+        for older readers.
+        """
         import joblib
         joblib.dump(
             {
@@ -825,9 +941,13 @@ class HiddenStateProbeLayer:
                 "threshold": self.threshold,
                 "fpr_budget": self.fpr_budget,
                 "max_length": self.max_length,
-                "compute_dtype": str(VRAMManager.get_optimal_dtype()),
-                "quantized_4bit": bool(getattr(
-                    getattr(self.model, "config", None), "quantization_config", None)),
+                "quantization_mode": self._current_quantization_mode(),
+                "extraction_dtype": self._current_extraction_dtype(),
+                "model_revision": getattr(self, "model_revision", None)
+                or pinned_revision(MODEL_REVISIONS, self.model_name),
+                # Legacy keys (pre-review schema) kept for older readers:
+                "compute_dtype": self._current_extraction_dtype(),
+                "quantized_4bit": self._current_quantization_mode().startswith("4bit"),
             },
             filepath,
         )
@@ -874,28 +994,79 @@ class HiddenStateProbeLayer:
                     f"Activation feature vectors depend on token span — retrain or align max_length."
                 )
 
-        # 4. Quantization Check
-        saved_quant = d.get("quantized_4bit")
-        current_quant = bool(getattr(
-            getattr(getattr(self, "model", None), "config", None), "quantization_config", None
-        ))
-        if saved_quant is not None and saved_quant != current_quant:
+        # 4. Quantization Check — prefer the precise mode string; fall back
+        # to the legacy boolean for artifacts saved before the review fix.
+        saved_mode = d.get("quantization_mode")
+        if saved_mode is not None:
+            current_mode = self._current_quantization_mode()
+            if saved_mode != current_mode:
+                raise ValueError(
+                    f"Probe fingerprint conflict: artifact was trained with "
+                    f"quantization_mode={saved_mode!r}, current runtime model "
+                    f"runs quantization_mode={current_mode!r}. Activation "
+                    f"distributions diverge across quantization regimes — "
+                    f"retrain probe."
+                )
+        else:
+            saved_quant = d.get("quantized_4bit")
+            current_quant = self._current_quantization_mode().startswith("4bit")
+            if saved_quant is not None and bool(saved_quant) != current_quant:
+                raise ValueError(
+                    f"Probe fingerprint conflict: artifact was trained with quantized_4bit={saved_quant}, "
+                    f"but current runtime model has quantized_4bit={current_quant}. "
+                    f"Activation distributions diverge under 4-bit quantization — retrain probe."
+                )
+            if saved_quant is not None:
+                logger.warning(
+                    "Legacy probe artifact: quantized_4bit=%s is a coarse "
+                    "descriptor; retrain to record the precise "
+                    "quantization_mode fingerprint.", saved_quant)
+
+        # 5. Model revision pin (audit D-1): the artifact is only valid for
+        # the exact Hub commit it was trained on. A different pin means
+        # different weights and different hidden states.
+        saved_revision = d.get("model_revision")
+        current_revision = (getattr(self, "model_revision", None)
+                            or pinned_revision(MODEL_REVISIONS, self.model_name))
+        if saved_revision is not None and current_revision is not None \
+                and saved_revision != current_revision:
             raise ValueError(
-                f"Probe fingerprint conflict: artifact was trained with quantized_4bit={saved_quant}, "
-                f"but current runtime model has quantized_4bit={current_quant}. "
-                f"Activation distributions diverge under 4-bit quantization — retrain probe."
+                f"Probe fingerprint conflict: artifact was trained at model "
+                f"revision {saved_revision[:12]}..., current runtime is pinned "
+                f"to {current_revision[:12]}.... Retrain the probe at the "
+                f"current revision."
             )
 
-        # 5. Dtype Notice (warn only to allow safe float16 <-> bfloat16 portability)
-        saved_dtype = d.get("compute_dtype")
+        # 6. Pooling must match: last-token and mean pooling produce
+        # different feature vectors and are not interchangeable.
+        saved_pooling = d.get("pooling")
+        if saved_pooling is not None and saved_pooling != self.pooling:
+            raise ValueError(
+                f"Probe fingerprint conflict: artifact was trained with "
+                f"pooling={saved_pooling!r}, pipeline runs pooling="
+                f"{self.pooling!r}. Retrain or align pooling."
+            )
+
+        # 7. Extraction dtype notice (warn only to allow safe float16 <->
+        # bfloat16 portability), now against the ACTUAL runtime dtype.
+        saved_dtype = d.get("extraction_dtype", d.get("compute_dtype"))
         if saved_dtype is not None:
-            current_dtype = str(VRAMManager.get_optimal_dtype())
-            if saved_dtype != current_dtype:
+            current_dtype = self._current_extraction_dtype()
+            if current_dtype not in ("unknown",) and saved_dtype != current_dtype:
                 logger.warning(
-                    "Probe fingerprint notice: artifact trained with compute_dtype=%s, "
-                    "current runtime optimal dtype is %s.",
+                    "Probe fingerprint notice: artifact trained with "
+                    "extraction_dtype=%s, current runtime extracts in %s.",
                     saved_dtype, current_dtype,
                 )
+
+        # 8. Artifact threshold sanity: a malformed threshold in the artifact
+        # must not bypass the F-12 constructor validation.
+        saved_thr = d.get("threshold", 0.5)
+        if not _is_valid_probability(saved_thr):
+            raise ValueError(
+                f"Probe artifact threshold {saved_thr!r} is not a finite "
+                f"probability in [0, 1] — refusing to load."
+            )
 
         self.probe = d["probe"]
         self.scaler = d.get("scaler")
@@ -903,7 +1074,7 @@ class HiddenStateProbeLayer:
             self.layers = trained_layers
             self.layer = self.layers[0]
         self.pooling = d.get("pooling", "last")
-        self.threshold = float(d.get("threshold", 0.5))
+        self.threshold = float(saved_thr)
         self.fpr_budget = float(d.get("fpr_budget", 0.01))
         if saved_max_len is not None:
             self.max_length = int(saved_max_len)
@@ -1081,6 +1252,17 @@ def l1_hard_block(l1_prob: float, total_chunks: int, alert_chunks: int,
 # ---------------------------------------------------------------------------
 # Configuration validation (audit finding F-12)
 # ---------------------------------------------------------------------------
+def _is_valid_probability(value) -> bool:
+    """True only for real numbers in [0, 1].
+
+    Explicitly rejects booleans (a bool IS an int), NaN, ±inf and
+    non-numeric types — a security threshold must mean what it says.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value) and 0.0 <= value <= 1.0
+
+
 def _validate_thresholds(
     l1_block_threshold: float,
     l1_escalate_threshold: float,
@@ -1091,7 +1273,11 @@ def _validate_thresholds(
     Probabilities live in [0, 1]; a threshold outside that range silently
     disables the layer it gates (e.g. ``probe_threshold=1.5`` can never be
     reached, so Layer 2 would never block; ``l1_block_threshold=2.0`` would
-    never fire). NaN is rejected by the same comparison.
+    never fire). NaN, ±inf, booleans and non-numeric values are rejected
+    with explicit ValueError — never via ``assert``, which Python can
+    disable. Probe-artifact thresholds are validated in
+    ``HiddenStateProbeLayer.load()`` with the same predicate, so a bad
+    artifact cannot bypass this check either.
 
     Warn — but do not error — when the escalate gate sits above the block
     threshold: since the F-01 fix that configuration is fail-closed-safe
@@ -1103,8 +1289,10 @@ def _validate_thresholds(
                         ("probe_threshold", probe_threshold)):
         if value is None:
             continue
-        if not (0.0 <= float(value) <= 1.0):
-            raise ValueError(f"{name}={value!r} is outside [0, 1]")
+        if not _is_valid_probability(value):
+            raise ValueError(
+                f"{name}={value!r} must be a finite number in [0, 1] "
+                f"(got {type(value).__name__})")
 
     if l1_escalate_threshold > l1_block_threshold:
         logger.warning(

@@ -31,18 +31,52 @@ Usage (Kaggle):
 
 import argparse
 import csv
+from typing import List
 
 import numpy as np
-from datasets import load_dataset
 
 from pipeline import (DATASET_REVISIONS, InjectionDetectionPipeline,
                       VRAMManager, l1_hard_block, pinned_revision)
 
 
 # --------------------------------------------------------------------------
-# Dataset registry: (name, loader)
+# Benchmark policy configurations (audit F-05: importable, testable, no
+# phantom dual-key row). Pure functions of the scores so the policy set is
+# testable without loading any model or dataset.
+# --------------------------------------------------------------------------
+def gate_config_keys() -> List[str]:
+    """The policies this harness reports, in output order."""
+    return ["L1-only", "L2-only", "stack(legacy gate)", "stack(always-on)"]
+
+
+def gate_blocked(cfg: str, p1: np.ndarray, p2: np.ndarray, hard: np.ndarray,
+                 l1_block: float, l1_gate: float, probe_thr: float) -> np.ndarray:
+    """Decision mask for one benchmark policy (pure function of scores).
+
+    NOTE: there is deliberately no dual-key config here. This harness scores
+    L2 on EVERY non-hard-blocked row, so dual-key's blocked-or-not bit is
+    algebraically identical to always-on — reporting it as a separate row
+    would be a phantom ablation (audit finding F-05). Its serving-side
+    behavior is covered by TestDualKeyPolicy in tests/smoke_offline.py.
+    """
+    if cfg == "L1-only":
+        return p1 >= l1_block
+    if cfg == "L2-only":
+        return p2 >= probe_thr                    # NaN -> False
+    if cfg == "stack(legacy gate)":
+        return hard | ((p1 >= l1_gate) & (p2 >= probe_thr))
+    if cfg == "stack(always-on)":
+        return hard | (p2 >= probe_thr)
+    raise ValueError(f"unknown benchmark config {cfg!r}")
+
+
+# --------------------------------------------------------------------------
+# Dataset registry: (name, loader). The heavy `datasets` import stays inside
+# the loaders (CLI execution path), so this module remains importable for
+# offline policy tests (audit review §3).
 # --------------------------------------------------------------------------
 def _load_deepset_test(cap):
+    from datasets import load_dataset
     ds = load_dataset(
         "deepset/prompt-injections", split="test",
         revision=pinned_revision(DATASET_REVISIONS, "deepset/prompt-injections"))
@@ -51,6 +85,7 @@ def _load_deepset_test(cap):
 
 
 def _load_jailbreak_classification_test(cap):
+    from datasets import load_dataset
     ds = load_dataset(
         "jackhhao/jailbreak-classification", split="test",
         revision=pinned_revision(DATASET_REVISIONS,
@@ -70,7 +105,7 @@ def _load_notinject(cap):
     Real structure: config 'default', splits NotInject_one/two/three (113 rows
     each), columns prompt/word_list/category. All three splits are concatenated.
     """
-    from datasets import get_dataset_split_names
+    from datasets import get_dataset_split_names, load_dataset
     _nj_rev = pinned_revision(DATASET_REVISIONS, "leolee99/NotInject")
     try:
         splits = [s for s in get_dataset_split_names(
@@ -99,6 +134,7 @@ def _load_notinject(cap):
 
 def _load_ttp(cap):
     """rubend18 ChatGPT-Jailbreak-Prompts: every row is a POSITIVE by construction."""
+    from datasets import load_dataset
     ds = load_dataset(
         "rubend18/ChatGPT-Jailbreak-Prompts", split="train",
         revision=pinned_revision(DATASET_REVISIONS,
@@ -211,26 +247,11 @@ def main() -> None:
                 VRAMManager.clear_cache()
 
         # ---- configs -------------------------------------------------
-        l1_only = p1 >= args.l1_block
-        l2_only = p2 >= thr                      # NaN -> False
-        legacy = hard | ((p1 >= args.l1_gate) & (p2 >= thr))
-        always_on = hard | (p2 >= thr)
-
-        # NOTE: no dual-key row here, by design (audit finding F-05).
-        # This harness scores L2 on EVERY non-hard-blocked row, so dual-key's
-        # blocked-or-not bit is algebraically identical to always-on:
-        #   hard | ((p1 >= block) & ~hard & (p2 >= thr)) | (p2 >= thr)
-        #     == hard | (p2 >= thr)
-        # Dual-key differs from always-on only in *attribution* (which layer
-        # blocked) and in latency, not in TPR/FPR — reporting it as a separate
-        # policy row was a phantom ablation. The serving-side behavior is
-        # verified instead by TestDualKeyPolicy in tests/smoke_offline.py.
-        defs = {
-            "L1-only": l1_only,
-            "L2-only": l2_only,
-            "stack(legacy gate)": legacy,
-            "stack(always-on)": always_on,
-        }
+        # Pure decision functions from gate_blocked() (importable + tested
+        # offline; the dual-key algebra note lives in its docstring).
+        defs = {cfg: gate_blocked(cfg, p1, p2, hard,
+                                  args.l1_block, args.l1_gate, thr)
+                for cfg in gate_config_keys()}
 
         for cfg, blocked in defs.items():
             tp = int(((y == 1) & blocked).sum())

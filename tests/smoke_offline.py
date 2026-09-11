@@ -14,7 +14,9 @@ Qwen2.5-7B per README.
 """
 
 import logging
+import os
 import re
+import subprocess
 import sys
 import types
 import unittest
@@ -768,17 +770,14 @@ class TestAuditSecurityFixes(unittest.TestCase):
                 runtime.load(tmp.name)
             self.assertIn("Probe fingerprint conflict", str(ctx.exception))
 
-    def test_f04_evaluator_predicate_matches_production(self):
-        """F-04: one shared predicate for serving and evaluation.
+    def test_f04_hard_block_truth_table(self):
+        """F-04 POLICY: the shared hard-block predicate, always runnable.
 
-        Long-term fix (reviewer-approved): the L1 hard-block rule exists in
-        exactly one place — pipeline.l1_unambiguous/l1_hard_block — called by
-        run(), evaluate_end_to_end.py and benchmark.py. The truth table below
-        exercises the REAL function; the source checks assert the evaluators
-        actually call it instead of re-implementing the rule.
+        This is the behavior test — it exercises the real function and does
+        NOT depend on any evaluator file existing, so it stays active inside
+        the extracted bundle too (audit review §3: do not skip the policy
+        truth table just because evaluate_end_to_end.py is absent).
         """
-        import re
-
         # Truth table against the real shared functions, incl. the two cases
         # that diverged pre-fix (0.87/1ch and 0.90/1ch).
         cases = [
@@ -791,6 +790,9 @@ class TestAuditSecurityFixes(unittest.TestCase):
             (0.85, 1, 1, False),
             (0.95, 1, 0, True),    # extreme peak is unambiguous
             (0.84, 5, 5, False),   # below block threshold entirely
+            # Reviewer §6 worked example: 0.88 single-chunk is ambiguous and
+            # must defer to L2, not hard-block.
+            (0.88, 1, 1, False),
         ]
         for p1, nch, nal, expected in cases:
             self.assertEqual(
@@ -805,7 +807,13 @@ class TestAuditSecurityFixes(unittest.TestCase):
         self.assertFalse(P.l1_hard_block(0.87, 1, 1, 0.90))
         self.assertTrue(P.l1_hard_block(0.97, 1, 1, 0.90))
 
-        # Both evaluators must use the shared helper, not a local copy.
+    def test_f04_evaluators_call_shared_predicate(self):
+        """F-04 DRIFT ALARM: evaluators must call the shared helper.
+
+        File-presence check only — skipped in the extracted bundle where the
+        evaluators are intentionally not shipped. The policy itself is locked
+        by test_f04_hard_block_truth_table above.
+        """
         root = Path(__file__).resolve().parent.parent
         for fname in ("evaluate_end_to_end.py", "benchmark.py"):
             fpath = root / fname
@@ -821,28 +829,107 @@ class TestAuditSecurityFixes(unittest.TestCase):
     def test_f05_benchmark_has_no_phantom_dual_key_config(self):
         """F-05: benchmark.py must not report dual-key as a distinct policy.
 
-        With always-on L2 scoring, dual-key's blocked-or-not bit is
-        algebraically identical to always-on; presenting it as a separate
-        row was a phantom ablation. benchmark.py ships in the verify.py
-        bundle, so this runs in extracted environments too.
+        Behavior test, not a comment search (audit review §3): import the
+        real configuration constructor and assert the policy SET. Dual-key's
+        blocked-or-not bit is algebraically identical to always-on when L2 is
+        scored on every non-hard-blocked row, so reporting it as a separate
+        row was a phantom ablation.
         """
         root = Path(__file__).resolve().parent.parent
-        src_path = root / "benchmark.py"
-        if not src_path.exists():
+        if not (root / "benchmark.py").exists():
             self.skipTest("benchmark.py not present")
-        src = src_path.read_text(encoding="utf-8")
-        self.assertNotIn("stack(dual-key)", src)
-        self.assertIn("stack(always-on)", src)
+        sys.path.insert(0, str(root))
+        import importlib
+        benchmark = importlib.import_module("benchmark")
+
+        keys = benchmark.gate_config_keys()
+        self.assertEqual(
+            keys, ["L1-only", "L2-only", "stack(legacy gate)",
+                   "stack(always-on)"],
+            "benchmark must report exactly these four policies")
+        self.assertFalse(any("dual" in k.lower() for k in keys),
+                         "dual-key must not be reported as a distinct policy")
+        with self.assertRaises(ValueError):
+            benchmark.gate_blocked("stack(dual-key)", None, None, None,
+                                   0.85, 0.30, 0.9)
+
+    def test_f05_dual_key_is_algebraically_always_on_here(self):
+        """F-05 companion: WHY the dual-key row would be a phantom.
+
+        Reconstruct the dual-key decision bit from the serving rule (hard OR
+        ambiguous-band-with-L2-confirm OR L2-block) and show it equals
+        always-on for the score grids this harness produces (L2 scored on
+        every non-hard-blocked row). This is the actual ablation content the
+        dropped row pretended to measure.
+        """
+        root = Path(__file__).resolve().parent.parent
+        if not (root / "benchmark.py").exists():
+            self.skipTest("benchmark.py not present")
+        import importlib
+        benchmark = importlib.import_module("benchmark")
+        import numpy as np
+
+        rng = np.random.RandomState(7)
+        n = 400
+        p1 = rng.rand(n)
+        p2 = np.where(rng.rand(n) < 0.15, np.nan, rng.rand(n))
+        l1_block, l1_gate, thr = 0.85, 0.30, 0.90
+        hard = np.array([P.l1_hard_block(float(p), 1, 1, l1_block) for p in p1])
+
+        always_on = benchmark.gate_blocked("stack(always-on)", p1, p2, hard,
+                                           l1_block, l1_gate, thr)
+        # Serving dual-key decision bit: hard rows block at L1; every other
+        # row is scored by L2 (escalate=0.0). Ambiguous-band rows are blocked
+        # iff L2 CONFIRMS (p2 >= thr) — which is exactly L2's own block
+        # condition. The final blocked-or-not bit therefore collapses to:
+        dual_key_bit = hard | np.where(np.isnan(p2), False, p2 >= thr)
+        self.assertTrue(np.array_equal(always_on, dual_key_bit),
+                        "dual-key bit must equal always-on on this harness")
+        # ...while attribution differs (which layer blocked) — which is why
+        # the dropped row was presentation, not a distinct policy.
 
     def test_f12_threshold_validation_rejects_out_of_range(self):
-        """F-12: thresholds outside [0, 1] (incl. NaN) must be rejected."""
-        for bad in (-0.1, 1.5, 2.0, float("nan")):
+        """F-12: thresholds outside [0, 1] (incl. NaN, ±inf, bad types)
+        must be rejected with explicit ValueError — never via assert."""
+        for bad in (-0.1, 1.5, 2.0, float("nan"), float("inf"),
+                    float("-inf"), "0.5", True, [0.5]):
             with self.assertRaises(ValueError):
                 P._validate_thresholds(bad, 0.0, None)
             with self.assertRaises(ValueError):
                 P._validate_thresholds(0.85, bad, None)
             with self.assertRaises(ValueError):
                 P._validate_thresholds(0.85, 0.0, bad)
+        # int 0 and 1 are valid probabilities; bool True is NOT (bool is an
+        # int subclass — a threshold of True cannot mean what it says).
+        P._validate_thresholds(0, 0, 1)          # no raise
+        with self.assertRaises(ValueError):
+            P._validate_thresholds(False, 0.0, None)
+
+    def test_f12_artifact_threshold_cannot_bypass_validation(self):
+        """F-12 §5.2: a malformed threshold baked into a probe artifact must
+        be refused at load() — the constructor check alone is not enough."""
+        import tempfile
+        import joblib
+
+        runtime = P.HiddenStateProbeLayer.__new__(P.HiddenStateProbeLayer)
+        runtime.model_name = "TestModel"
+        runtime.layers, runtime.layer = [16], 16
+        runtime.pooling = "last"
+        runtime.max_length = 1024
+        runtime.model = types.SimpleNamespace(config=types.SimpleNamespace())
+
+        for bad_thr in (1.5, float("nan"), -0.2, float("inf"), "0.9"):
+            artifact = {
+                "probe": object(), "scaler": None, "layer": 16,
+                "layers": [16], "pooling": "last", "model_name": "TestModel",
+                "threshold": bad_thr, "fpr_budget": 0.01,
+                "max_length": 1024,
+            }
+            with tempfile.NamedTemporaryFile(suffix=".joblib") as tmp:
+                joblib.dump(artifact, tmp.name)
+                with self.assertRaises(ValueError) as ctx:
+                    runtime.load(tmp.name)
+                self.assertIn("threshold", str(ctx.exception).lower())
 
     def test_f12_threshold_validation_accepts_valid_and_warns_on_gate_order(self):
         """F-12 companion: valid ranges pass; escalate > block only warns.
@@ -905,6 +992,275 @@ class TestAuditSecurityFixes(unittest.TestCase):
                           os.path.join("tests", "smoke_offline.py")):
                 self.assertFalse((Path(d) / other).exists(),
                                  f"{other} written despite mismatch")
+
+
+class TestL1VoteHandling(unittest.TestCase):
+    """F-02 tightening (audit review §4A): reject — never clamp — malformed
+    guard output, and only complement a score under a verified binary
+    class contract."""
+
+    def _l1_with(self, *entries):
+        l1 = P.TextClassifierLayer.__new__(P.TextClassifierLayer)
+        l1.classifiers = list(entries)
+        l1.tokenizer = types.SimpleNamespace(
+            encode=lambda t, **k: list(range(10)),
+            decode=lambda ids, **k: "x",
+        )
+        l1.max_length, l1.chunk_overlap, l1.max_chunks = 512, 50, 64
+        return l1
+
+    @staticmethod
+    def _entry(pipe, labels=None, known=None, binary=True):
+        return {"name": "guard", "pipe": pipe,
+                "labels": labels if labels is not None else {"injection"},
+                "known_labels": known if known is not None
+                else {"injection", "safe"},
+                "binary": binary}
+
+    def test_non_finite_score_is_a_guard_failure_not_a_vote(self):
+        class Bad:
+            def __call__(self, chunk):
+                return [{"label": "injection", "score": float("nan")}]
+
+        l1 = self._l1_with(self._entry(Bad()))
+        with self.assertRaises(RuntimeError) as ctx:
+            l1.score("text")
+        self.assertIn("All L1 guards failed", str(ctx.exception))
+
+    def test_out_of_range_score_is_a_guard_failure_not_clamped(self):
+        class Bad:
+            def __call__(self, chunk):
+                return [{"label": "injection", "score": 1.7}]
+
+        l1 = self._l1_with(self._entry(Bad()))
+        with self.assertRaises(RuntimeError):
+            l1.score("text")
+        # A clamped implementation would have returned SAFE/0.0 instead.
+
+    def test_unknown_label_is_a_guard_failure(self):
+        class Weird:
+            def __call__(self, chunk):
+                return [{"label": "HARMLESS", "score": 0.99},
+                        {"label": "injection", "score": 0.01}]
+
+        # "harmless" is not in the guard's known class contract.
+        l1 = self._l1_with(self._entry(Weird()))
+        with self.assertRaises(RuntimeError) as ctx:
+            l1.score("text")
+        self.assertIn("All L1 guards failed", str(ctx.exception))
+
+    def test_verified_binary_complement_still_works(self):
+        class TopOne:
+            def __call__(self, chunk):
+                return [{"label": "safe", "score": 0.93}]
+
+        l1 = self._l1_with(self._entry(TopOne()))
+        decision, prob, meta = l1.score("text")
+        self.assertEqual(decision, "SAFE")
+        self.assertAlmostEqual(prob, 0.07)
+
+    def test_single_row_without_binary_contract_is_a_failure(self):
+        class TopOne:
+            def __call__(self, chunk):
+                return [{"label": "classA", "score": 0.4}]
+
+        entry = self._entry(TopOne(), labels={"injection"},
+                            known={"classa", "classb", "classc"}, binary=False)
+        l1 = self._l1_with(entry)
+        with self.assertRaises(RuntimeError):
+            l1.score("text")
+
+    def test_multi_row_without_injection_row_is_a_failure(self):
+        class Both:
+            def __call__(self, chunk):
+                return [{"label": "safe", "score": 0.6},
+                        {"label": "other", "score": 0.4}]
+
+        entry = self._entry(Both(), labels={"injection"},
+                            known={"safe", "other"})
+        l1 = self._l1_with(entry)
+        with self.assertRaises(RuntimeError):
+            l1.score("text")
+
+    def test_healthy_guard_survives_a_sick_colleague(self):
+        class Bad:
+            def __call__(self, chunk):
+                return [{"label": "injection", "score": float("inf")}]
+
+        class Healthy:
+            def __call__(self, chunk):
+                return [{"label": "injection", "score": 0.91},
+                        {"label": "safe", "score": 0.09}]
+
+        l1 = self._l1_with(self._entry(Bad()),
+                           dict(self._entry(Healthy()), name="healthy"))
+        decision, prob, meta = l1.score("text")
+        self.assertEqual(decision, "INJECTION")
+        self.assertAlmostEqual(prob, 0.91)
+        # Exactly one valid vote survived.
+        self.assertEqual(meta["guard_votes_per_chunk"], [[0.91]])
+
+
+class TestProbeFingerprintRuntime(unittest.TestCase):
+    """F-03 tightening (audit review §4B): the fingerprint must describe the
+    ACTUAL extraction runtime, and load() must compare precise descriptors."""
+
+    def _runtime(self, **attrs):
+        r = P.HiddenStateProbeLayer.__new__(P.HiddenStateProbeLayer)
+        r.model_name = "TestModel"
+        r.layers, r.layer = [16], 16
+        r.pooling = "last"
+        r.max_length = 1024
+        r.model = types.SimpleNamespace(config=types.SimpleNamespace())
+        for k, v in attrs.items():
+            setattr(r, k, v)
+        return r
+
+    def _artifact(self, **over):
+        d = {"probe": object(), "scaler": None, "layer": 16, "layers": [16],
+             "pooling": "last", "model_name": "TestModel", "threshold": 0.85,
+             "fpr_budget": 0.01, "max_length": 1024}
+        d.update(over)
+        return d
+
+    def _dump(self, d):
+        import tempfile
+        import joblib
+        tmp = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
+        joblib.dump(d, tmp.name)
+        tmp.close()
+        return tmp.name
+
+    def test_describe_quantization_modes(self):
+        self.assertEqual(P._describe_quantization(None), "none")
+        m = types.SimpleNamespace(config=types.SimpleNamespace(
+            quantization_config=types.SimpleNamespace(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4")))
+        self.assertEqual(P._describe_quantization(m), "4bit-nf4")
+        m8 = types.SimpleNamespace(config=types.SimpleNamespace(
+            quantization_config={"load_in_8bit": True}))
+        self.assertEqual(P._describe_quantization(m8), "8bit")
+        mg = types.SimpleNamespace(config=types.SimpleNamespace(
+            quantization_config={"quant_method": "gptq"}))
+        self.assertEqual(P._describe_quantization(mg), "other:gptq")
+
+    def test_load_rejects_quantization_mode_mismatch(self):
+        path = self._dump(self._artifact(quantization_mode="4bit-nf4"))
+        with self.assertRaises(ValueError) as ctx:
+            self._runtime(_quantization_mode="none").load(path)
+        self.assertIn("quantization_mode", str(ctx.exception))
+
+    def test_load_rejects_model_revision_mismatch(self):
+        path = self._dump(self._artifact(model_revision="a" * 40))
+        with self.assertRaises(ValueError) as ctx:
+            self._runtime(model_revision="b" * 40).load(path)
+        self.assertIn("revision", str(ctx.exception))
+
+    def test_load_rejects_pooling_mismatch(self):
+        path = self._dump(self._artifact(pooling="mean"))
+        with self.assertRaises(ValueError) as ctx:
+            self._runtime().load(path)
+        self.assertIn("pooling", str(ctx.exception))
+
+    def test_legacy_artifact_still_loads(self):
+        """Pre-review artifacts (coarse keys only) load with a warning, not a
+        crash — the deployed probe_qwen_layer20.joblib must keep working."""
+        import unittest.mock as mock
+        path = self._dump(self._artifact(quantized_4bit=False,
+                                         compute_dtype="torch.float16"))
+        r = self._runtime(_quantization_mode="none")
+        with mock.patch.object(P.logger, "warning"):
+            r.load(path)
+        self.assertAlmostEqual(r.threshold, 0.85)
+
+    def test_save_records_actual_runtime_fingerprint(self):
+        import os
+        import joblib
+        r = self._runtime(_quantization_mode="4bit-nf4",
+                          _extraction_dtype="torch.float16",
+                          _extraction_dtype_observed=None,
+                          model_revision="c" * 40)
+        r.probe, r.scaler, r.threshold, r.fpr_budget = object(), None, 0.9, 0.01
+        path = self._dump({})
+        r.save(path)
+        d = joblib.load(path)
+        self.assertEqual(d["quantization_mode"], "4bit-nf4")
+        self.assertEqual(d["extraction_dtype"], "torch.float16")
+        self.assertEqual(d["model_revision"], "c" * 40)
+        self.assertTrue(d["quantized_4bit"])          # legacy key consistent
+        os.unlink(path)
+
+
+class TestInstallerLocalEdits(unittest.TestCase):
+    """F-11 matrix (audit review §2): embedded-payload verification alone
+    does NOT protect local edits. A VALID bundle must refuse to overwrite a
+    differing destination file unless --force is passed explicitly."""
+
+    VERIFY = Path(__file__).resolve().parent.parent / "verify.py"
+
+    def setUp(self):
+        if not self.VERIFY.exists():
+            self.skipTest("verify.py not present")
+        if os.environ.get("ENS_VERIFY_CHILD"):
+            self.skipTest("nested installer run (recursion guard)")
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        import shutil
+        shutil.copy(self.VERIFY, os.path.join(self.dir, "verify.py"))
+
+    def tearDown(self):
+        if hasattr(self, "tmp"):
+            self.tmp.cleanup()
+
+    def _run(self, *args):
+        env = dict(os.environ, ENS_VERIFY_CHILD="1")
+        return subprocess.run(
+            [sys.executable, "verify.py", *args], cwd=self.dir,
+            capture_output=True, text=True, timeout=600, env=env)
+
+    def _edit_local_pipeline(self):
+        target = os.path.join(self.dir, "pipeline.py")
+        with open(target, "wb") as fh:
+            fh.write(b"# LOCAL EDIT the operator wants to keep\n")
+        with open(target, "rb") as fh:
+            return fh.read()
+
+    def test_valid_bundle_refuses_conflicting_local_edits(self):
+        edited = self._edit_local_pipeline()
+        proc = self._run()
+        self.assertEqual(proc.returncode, 4,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertIn("LOCAL CONFLICT", proc.stdout)
+        self.assertIn("No files were written", proc.stdout)
+        # Destination bytes preserved AND no partial install happened.
+        with open(os.path.join(self.dir, "pipeline.py"), "rb") as fh:
+            self.assertEqual(fh.read(), edited)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "train_probe.py")),
+                         "installer partially wrote before detecting conflict")
+
+    def test_valid_bundle_force_overwrites_explicitly(self):
+        self._edit_local_pipeline()
+        proc = self._run("--force")
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertIn("OVERWRITING", proc.stdout)
+        # The file now matches the canonical bundled source.
+        repo_pipeline = (Path(__file__).resolve().parent.parent
+                         / "pipeline.py").read_bytes()
+        with open(os.path.join(self.dir, "pipeline.py"), "rb") as fh:
+            self.assertEqual(fh.read(), repo_pipeline)
+
+    def test_valid_bundle_is_a_noop_when_identical(self):
+        first = self._run()
+        self.assertEqual(first.returncode, 0, first.stdout[-2000:])
+        target = os.path.join(self.dir, "pipeline.py")
+        before = os.stat(target).st_mtime_ns
+        second = self._run()
+        self.assertEqual(second.returncode, 0, second.stdout[-2000:])
+        self.assertIn("already up to date", second.stdout)
+        self.assertEqual(os.stat(target).st_mtime_ns, before,
+                         "identical file was rewritten instead of no-op")
 
 
 class TestBatchBDecisions(unittest.TestCase):

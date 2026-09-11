@@ -314,3 +314,53 @@ Kaggle T4) and F-10 generation timeouts.
 the local clone to the base commit; the full chain (through `4afa812`) was
 recovered via `git fetch` + `git reset --hard`, and the Batch B edits were
 re-applied on top. No committed content was lost or altered.
+
+## Addendum — 2026-09-11 (review round R5: verification & tightening)
+
+The reviewer's second-pass critique (Batch A era) accepted the direction and
+flagged one incorrect inference plus four tightening items. All addressed in
+commit `<R5-COMMIT>`:
+
+1. **Incorrect claim corrected (review §2).** "Verify-then-write protects
+   local edits" was WRONG: embedded-payload digests only prove bundle
+   integrity; a VALID bundle could still silently overwrite a locally
+   edited destination file. The generated installer now runs a destination
+   conflict scan before the first write — differing files refuse (exit 4,
+   nothing written), identical files no-op, `--force` overwrites
+   explicitly. The full matrix (valid×{absent, identical, differing},
+   invalid×any) is regression-locked in
+   `tests/smoke_offline.py::TestInstallerLocalEdits` and was also exercised
+   manually end-to-end. INSTALL.md documents the two-phase behavior.
+2. **F-02 (§4A):** malformed guard output is rejected, never clamped —
+   non-finite/out-of-range scores, unknown labels, and unverified
+   single-row results are guard failures; the benign complement applies
+   only under a verified binary class contract
+   (`TestL1VoteHandling`, 7 tests).
+3. **F-03 (§4B):** fingerprint records the ACTUAL extraction runtime —
+   precise `quantization_mode`, observed/loaded `extraction_dtype` (not the
+   hardware-policy recommendation), `model_revision` (D-1 pin), strict
+   pooling comparison. Legacy artifacts keep loading with a warning
+   (`TestProbeFingerprintRuntime`, 6 tests).
+4. **F-12 (§5):** `_is_valid_probability` rejects NaN, ±inf, booleans and
+   non-numeric types with explicit ValueError; `load()` applies the same
+   predicate to artifact thresholds so artifacts cannot bypass constructor
+   validation.
+5. **Test honesty (§3):** F-05 is now a behavior/config test of importable
+   pure functions (`benchmark.gate_config_keys`/`gate_blocked`), not a
+   comment search; the F-04 truth table runs unconditionally with only the
+   file-presence drift alarm skippable; heavy `datasets` imports moved into
+   CLI paths. Exact per-environment results (passed/failed/skipped) are
+   recorded in `audit/RELEASE_NOTES.md`, including the fresh-checkout and
+   extracted-bundle summaries.
+6. **Metric honesty (§6):** no document claims TPR/FPR are unchanged by the
+   F-04 correction; the README caveat carries the reviewer's worked example
+   (p1=0.88 single-chunk, L2=0.10 → old evaluator BLOCK, corrected
+   evaluator ALLOW) and instructs recomputation of final metrics and
+   per-layer attribution before publishing.
+
+Validation: in-repo suite `Ran 67 tests ... OK` (0 skipped); extracted
+bundle `Ran 67 tests ... OK (skipped=2)` — the two skips are packaging
+limitations (evaluator file and README not shipped), while their underlying
+policy tests still run. `audit/repro_findings.py` exit 0 (F-01..F-04
+FIXED). Remaining open: Fix 11's Kaggle training run, real-hardware
+validation (`TEST_RESULTS.md` §6), F-10 generation timeouts, F-13/F-14.

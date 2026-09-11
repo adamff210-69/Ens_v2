@@ -1,5 +1,47 @@
 # PATCH_PLAN.md — Prioritized minimal fixes
 
+> **Status 2026-09-11 (Review round R5 — verification & tightening):**
+> Response to the reviewer's second-pass critique. IMPLEMENTED and
+> regression-locked (suite 67/67 in-repo; bundle 67 ran / 65 passed /
+> 2 skipped by packaging design):
+> 1. **F-11 corrected claim + real local-edit protection.** The generated
+>    installer now performs TWO pre-write checks: embedded-payload digests
+>    (exit 2 on mismatch) AND a destination conflict scan — any existing
+>    file that differs from the bundle is refused before the first write
+>    (exit 4, "No files were written"); identical files are a no-op;
+>    `--force` makes overwriting explicit. Test matrix covers
+>    absent/identical/differing destinations plus the corrupted-bundle case.
+> 2. **F-02 tightened (§4A).** Guard output is rejected, never clamped:
+>    non-finite or out-of-[0,1] scores are guard failures; an unknown label
+>    is a guard failure; the benign complement `1 - score` applies ONLY
+>    under a verified binary class contract (exactly two known classes,
+>    returned row is the known non-injection class). Total-failure raise
+>    and partial-failure degraded voting retained (7 tests).
+> 3. **F-03 tightened (§4B).** The probe fingerprint now records the ACTUAL
+>    extraction runtime: `quantization_mode` ('none'/'4bit-nf4'/'8bit'/
+>    'other:<method>' — not a boolean), `extraction_dtype` (observed tensor
+>    dtype when a forward pass ran, else the loaded parameter/compute
+>    dtype — not the hardware-policy recommendation), and `model_revision`
+>    (the D-1 pin the weights were trained at). Pooling is compared
+>    strictly. Legacy artifacts (coarse keys only) still load with a
+>    warning, so the deployed probe artifact keeps working.
+> 4. **F-12 coverage (§5).** `_validate_thresholds` rejects ±inf, booleans
+>    and non-numeric types via a shared `_is_valid_probability` predicate
+>    (explicit ValueError, no asserts); `load()` applies the same predicate
+>    to artifact thresholds so a bad artifact cannot bypass constructor
+>    validation.
+> 5. **F-05/F-04 tests hardened (§3).** benchmark.py exposes its policy
+>    set as importable pure functions (`gate_config_keys`/`gate_blocked`);
+>    the F-05 test now asserts the actual configuration and the dual-key
+>    algebra instead of searching comments. The F-04 truth table runs
+>    unconditionally (bundle included); only the evaluator-file drift alarm
+>    skips when the file is absent. Heavy `datasets` imports moved into CLI
+>    execution paths in benchmark.py / evaluate_end_to_end.py.
+> 6. **Honest reporting (§3/§6).** Exact per-environment summaries are
+>    recorded in `audit/RELEASE_NOTES.md`; the README gate-table caveat now
+>    includes the reviewer's 0.88/L2=0.10 worked example and an explicit
+>    "do not assume TPR/FPR unchanged" instruction.
+>
 > **Status 2026-09-11 (Batch B + Batch C offline parts):** Fixes 8 (D-2/F-08),
 > 9 (F-07) and 12 (D-1) are IMPLEMENTED and regression-locked
 > (`tests/smoke_offline.py::TestBatchBDecisions`, 5 tests; suite 48/48 OK):

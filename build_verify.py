@@ -48,10 +48,20 @@ Usage, in the directory you want the files written to (e.g. /kaggle/working):
 
 Verifies each embedded payload (pipeline.py, train_probe.py, benchmark.py,
 tests/smoke_offline.py) against a pinned SHA-256 BEFORE writing anything,
-extracts only if all digests match, re-hashes the written files, and then
-runs the offline test suite so a bad transfer cannot go unnoticed.
+then scans the destination: files that already exist and DIFFER from the
+bundle are refused by default (local edits are preserved; re-run with
+--force to overwrite them explicitly). Identical files are a no-op. Only
+if every payload matches AND there are no unresolved conflicts does it
+extract, re-hash the written files from disk, and run the offline test
+suite — so neither a bad transfer nor a silent overwrite can go unnoticed.
+
+Exit codes: 0 ok · 2 corrupt bundle · 3 post-write mismatch · 4 local
+conflict (nothing written) · 64 bad CLI usage.
 
 Stdlib only: no pip installs, no network, Python 3.8+.
+
+    python3 verify.py            # refuse to overwrite differing local files
+    python3 verify.py --force    # explicitly overwrite them
 """
 import base64
 import gzip
@@ -72,11 +82,18 @@ __EXPECTED__
 
 
 def main() -> int:
-    # Verify FIRST, write SECOND (audit finding F-11). The old installer
-    # overwrote files in the CWD before checking digests, so re-running it
-    # in a tree with local edits silently reverted those edits before
-    # reporting the mismatch. Now: decode + hash in memory, compare all
-    # digests, write only if every payload matches, then re-hash from disk.
+    force = "--force" in sys.argv[1:]
+    unknown = [a for a in sys.argv[1:] if a != "--force"]
+    if unknown:
+        print("usage: python3 verify.py [--force]")
+        print("  --force  overwrite local files that differ from the bundle")
+        return 64
+
+    # Phase 1 - verify FIRST, write SECOND (audit finding F-11). The old
+    # installer overwrote files in the CWD before checking digests, so a
+    # corrupt transfer clobbered local work before reporting itself. Now:
+    # decode + hash in memory, compare all digests, continue only if every
+    # payload matches.
     print("verifying %d embedded payloads (in memory, nothing written yet)"
           % len(FILES))
     decoded = {}
@@ -97,9 +114,43 @@ def main() -> int:
         print("No files were written.")
         return 2
 
+    # Phase 2 - local-conflict scan BEFORE the first write (reviewer R2).
+    # Payload verification alone does not protect local edits: a VALID
+    # bundle would otherwise silently overwrite a locally edited file.
+    # Any destination that exists and differs is refused by default;
+    # identical files are a no-op; --force makes overwriting explicit.
+    conflicts, up_to_date, to_write = [], [], []
+    for name, raw in decoded.items():
+        target = os.path.join(os.getcwd(), name)
+        if not os.path.exists(target):
+            to_write.append(name)
+            continue
+        with open(target, "rb") as fh:
+            existing = fh.read()
+        if hashlib.sha256(existing).hexdigest() == EXPECTED[name]:
+            up_to_date.append(name)
+        else:
+            conflicts.append(name)
+
+    if conflicts and not force:
+        print("\\nLOCAL CONFLICT: %d destination file(s) differ from the bundle:"
+              % len(conflicts))
+        for name in conflicts:
+            print("  - %s" % name)
+        print("Refusing to overwrite local edits. Review them, then keep")
+        print("them, or re-run with --force to replace them explicitly.")
+        print("No files were written.")
+        return 4
+
+    for name in up_to_date:
+        print("  [== ] %-26s already up to date (no write)" % name)
+    for name in conflicts:
+        print("  [!! ] %-26s differs locally - OVERWRITING (--force)" % name)
+
     print("\\nall checksums match - extracting into %s" % os.getcwd())
     post_write_bad = []
-    for name, raw in decoded.items():
+    for name in sorted(set(to_write) | set(conflicts)):
+        raw = decoded[name]
         target = os.path.join(os.getcwd(), name)
         parent = os.path.dirname(target)
         if parent:
