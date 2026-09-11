@@ -23,10 +23,10 @@ the audited code:
     %cd /kaggle/working
     !git clone https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout 21a1fdc29ef52caff2f07e92b8ecead1b82370ed   # audited artifact
+    !git checkout b7f36c2f36df0adb87d4b2251f140e255aa3451c   # audited artifact
                                                             # (audit fixes
                                                             # F-01..F-08, F-11,
-                                                            # F-12, D-1 incl.)
+                                                            # F-12, D-1, R5 incl.)
     !python verify.py
 
 Which performs two distinct safety checks **before writing anything**:

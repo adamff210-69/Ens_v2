@@ -319,7 +319,7 @@ re-applied on top. No committed content was lost or altered.
 
 The reviewer's second-pass critique (Batch A era) accepted the direction and
 flagged one incorrect inference plus four tightening items. All addressed in
-commit `<R5-COMMIT>`:
+commit `b7f36c2f36df0adb87d4b2251f140e255aa3451c`:
 
 1. **Incorrect claim corrected (review §2).** "Verify-then-write protects
    local edits" was WRONG: embedded-payload digests only prove bundle
