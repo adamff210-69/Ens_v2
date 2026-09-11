@@ -23,15 +23,15 @@ the audited code:
     %cd /kaggle/working
     !git clone https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout a0e7cad1c95224ba9ef2a2ff45cd45f0be6bc907   # audited artifact
+    !git checkout 21a1fdc29ef52caff2f07e92b8ecead1b82370ed   # audited artifact
                                                             # (audit fixes
-                                                            # F-01..F-06, F-11,
-                                                            # F-12 included)
+                                                            # F-01..F-08, F-11,
+                                                            # F-12, D-1 incl.)
     !python verify.py
 
 Which verifies each embedded payload against a pinned SHA-256 **before
 writing anything**, extracts the four runtime files only if all digests
-match (then re-hashes them from disk), and runs the 43-test offline suite.
+match (then re-hashes them from disk), and runs the 48-test offline suite.
 A mismatch exits non-zero and leaves your local files untouched.
 
 If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
@@ -43,7 +43,7 @@ If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 Because it is fetched from the pinned repository — not an anonymous paste —
 you can audit it before uploading.
 
-1. Download **`verify.py`** (~51 KB) from the repo at the pinned commit:
+1. Download **`verify.py`** (~63 KB) from the repo at the pinned commit:
    `https://github.com/adamff210-69/Ens_v2/blob/<commit>/verify.py`
    (raw link -> right-click -> Save), or `git clone` locally first.
 2. Kaggle notebook → right sidebar → **Data → Upload** → drop it in (it

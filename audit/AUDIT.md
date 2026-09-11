@@ -278,3 +278,39 @@ Fix 9 (needs F-07 decision), Fix 11 (needs Kaggle training run), Fix 12 (D-1).
 to the base commit; the remote branch kept the full chain, so local history
 was recovered with `git fetch` and Batch A was committed directly on top of
 `2a03104`. No content was reconstructed or altered by this recovery.
+
+## Addendum — 2026-09-11 (Batch B + Batch C offline parts)
+
+Fixes 8 (D-2/F-08), 9 (F-07) and 12 (D-1) of `PATCH_PLAN.md` were approved
+with the reviewer-recommended options and implemented in commit
+`21a1fdc29ef52caff2f07e92b8ecead1b82370ed`, with regression locks in
+`tests/smoke_offline.py::TestBatchBDecisions` (5 tests; suite 48/48 OK):
+
+- **D-2/F-08 (fix 8).** `InjectionDetectionPipeline.__init__` gained
+  `require_probe=True` (default): construction raises `RuntimeError` via
+  `_check_probe_requirement()` when no probe is attached, so a serving stack
+  can no longer silently degrade to L1+L3. `kaggle_notebook.py` passes
+  `require_probe=False` (documented demo mode; one-time WARNING logged).
+- **F-07 (fix 9).** README "Security posture" documents the L2 1024-token
+  prefix-probe residual risk as a known gap; `max_length` deliberately NOT
+  raised (would invalidate the probe fingerprint).
+- **D-1 (fix 12).** `MODEL_REVISIONS` / `DATASET_REVISIONS` in `pipeline.py`
+  pin all three models and four datasets to the commit SHAs verified against
+  the HF API on 2026-09-11; every `from_pretrained`, `load_dataset`, and
+  `get_dataset_split_names` call site threads the pin through.
+- **Batch C offline parts.** README gained the F-09 recalibration runbook
+  (`train_probe.py` OOF calibration is the supported path; the deployed 0.90
+  artifact is test-adjusted until retrained) and the post-F-04 gate-table
+  attribution caveat (single-chunk `0.85 ≤ p1 < 0.95` rows now attribute to
+  L2/dual-key; re-run evaluators before publishing). `PROJECT_STATUS.md` §8
+  references the real-hardware validation checklist (`TEST_RESULTS.md` §6).
+
+Validation: suite 48/48 OK in-repo; `audit/repro_findings.py` exit 0
+(F-01..F-04 FIXED); regenerated `verify.py` bundle extracted and PASSED in a
+clean directory (exit 0). Remaining open: fix 11's training run (needs
+Kaggle T4) and F-10 generation timeouts.
+
+**Operational note (2):** a second sandbox reset mid-session again reverted
+the local clone to the base commit; the full chain (through `4afa812`) was
+recovered via `git fetch` + `git reset --hard`, and the Batch B edits were
+re-applied on top. No committed content was lost or altered.
