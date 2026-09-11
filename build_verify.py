@@ -188,24 +188,27 @@ next steps, in a FRESH Kaggle session (no model resident):
     import os; from kaggle_secrets import UserSecretsClient
     os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
 
-  1) train the probe on the TRAIN split (out-of-fold calibration,
-     ~25-45 min on 2x T4):
+  1) train the probe on the TRAIN split (out-of-fold calibration).
+     HEADLINE = multi-layer probe (~40-60 min on 2x T4):
+    !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" \\
+        --layers 12,16,20,24 --fpr_limit 0.01 --n_splits 5 --notinject \\
+        --pos_variants 3 --output probe_qwen_ml.joblib \\
+        2>&1 | tee training.log
+     cheaper BASELINE/ABLATION = single layer 20 (~25-45 min):
     !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" --layer 20 \\
         --fpr_limit 0.01 --n_splits 5 --notinject \\
-        --output probe_qwen_layer20.joblib
+        --output probe_qwen_layer20.joblib 2>&1 | tee training.log
 
   2) evaluate + benchmark with the SAME probe layer(s) you trained.
      A mismatched --layers is refused by the probe fingerprint check
-     (that is F-03 working, not a bug):
-    !python evaluate_probe.py --probe probe_qwen_layer20.joblib --layer 20
-    !python evaluate_end_to_end.py --probe probe_qwen_layer20.joblib \\
-        --layer 20 --l1_escalate 0.0 --dump_scores e2e_scores.csv
-    !python benchmark.py --probe probe_qwen_layer20.joblib --layer 20 \\
+     (that is F-03 working, not a bug). Multi-layer artifact:
+    !python evaluate_probe.py --probe probe_qwen_ml.joblib --layers 12,16,20,24
+    !python evaluate_end_to_end.py --probe probe_qwen_ml.joblib \\
+        --layers 12,16,20,24 --l1_escalate 0.0 --dump_scores e2e_scores.csv
+    !python benchmark.py --probe probe_qwen_ml.joblib --layers 12,16,20,24 \\
         --per_dataset 250 --dump_scores bench_scores.csv
-
-  multi-layer variant: train with --layers 12,16,20,24 --output
-  probe_qwen_ml.joblib, then pass --layers 12,16,20,24 to EVERY
-  eval/benchmark command as well.
+     single-layer artifact: replace --layers 12,16,20,24 with --layer 20
+     and the artifact name in all three commands.
 """)
     return 0
 

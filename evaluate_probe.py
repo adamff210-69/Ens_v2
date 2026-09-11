@@ -27,7 +27,12 @@ def main() -> None:
     parser.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", type=str)
     parser.add_argument("--probe", default="probe_qwen_layer20.joblib", type=str,
                         help="Trained probe artifact (train split ONLY, never test)")
-    parser.add_argument("--layer", default=20, type=int)
+    parser.add_argument("--layer", default=20, type=int,
+                        help="Compat single probe layer (ignored if --layers set)")
+    parser.add_argument("--layers", default=None, type=str,
+                        help="Probe layers of the artifact, e.g. '12,16,20,24' "
+                             "— must match the artifact or the fingerprint "
+                             "check refuses the load")
     parser.add_argument("--pooling", default="last", type=str)
     parser.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"), type=str,
                         help="HF token; falls back to the HF_TOKEN env var")
@@ -36,9 +41,12 @@ def main() -> None:
     args = parser.parse_args()
 
     print("Loading probe artifact + base LLM (this is the heavy step)...")
+    layers = ([int(x) for x in args.layers.split(",") if x.strip()]
+              if args.layers else None)
     probe = HiddenStateProbeLayer(
         model_name=args.model,
         layer=args.layer,
+        layers=layers,
         pooling=args.pooling,
         hf_token=args.hf_token,
         load_in_4bit=args.load_in_4bit,

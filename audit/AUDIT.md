@@ -395,3 +395,38 @@ fingerprint semantics changed. The pending items from the run review are
 unchanged: training completion, OOF AUC/threshold evidence, per-GPU
 residency + parameter dtype on hardware, and the post-F-04 end-to-end
 recompute.
+
+## Addendum — 2026-09-11 (pinned dataset layouts verified; multi-layer eval path)
+
+Dataset-loading 404s in the Kaggle training log were inspected against the
+HF API at the pinned revisions (read-only, offline):
+
+- `deepset/prompt-injections` @ `4f61ecb`: `data/train-*.parquet` +
+  `data/test-*.parquet`, no loading script. README dataset_info declares
+  `text:string`, `label:int64`, 546/116 rows. The 404s on
+  `prompt-injections.py` and `.huggingface.yaml` are normal legacy-script
+  discovery probes for parquet-backed datasets — expected noise, not
+  failure. Label semantics (1 = injection) must still be confirmed
+  empirically in the session (K1b preflight shows one example per class).
+- `jackhhao/jailbreak-classification` @ `2f2ceeb`: README declares config
+  `default` → `balanced/jailbreak_dataset_{train,test}_balanced.csv`; the
+  `default/` CSVs seen in HTTP logs are a separate layout. Splits
+  train/test resolve as the CLIs use them.
+- `leolee99/NotInject` @ `847ae76`: `data/` contains both the custom
+  `NotInject_one/two/three-*.parquet` files and standard train/test/
+  validation parquets (identical OIDs) — split discovery as assumed.
+- `rubend18/ChatGPT-Jailbreak-Prompts` @ `b93e498`: CSV-only repo with no
+  data_files declaration; benchmark-only, and a load failure there is
+  caught and skipped (`[skip] load failed:`), never fatal to training.
+
+Conclusion: a Parquet fallback in `train_probe.py` is NOT justified unless
+the isolated Kaggle preflight (`kaggle_session_r5.py` K1b) shows normal
+loading actually failing — per the reviewer's "don't add it until confirmed"
+instruction.
+
+Same commit also closes the multi-layer evaluation gap: `evaluate_probe.py`
+and `evaluate_end_to_end.py` gained `--layers` (comma-separated, matching
+the artifact's fingerprint), so the headline multi-layer probe
+(12,16,20,24) can be evaluated end-to-end; the verify.py next-steps and the
+session script now present multi-layer as HEADLINE and single-layer 20 as
+the cheaper baseline/ablation, each with matched eval flags.

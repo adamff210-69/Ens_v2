@@ -32,7 +32,7 @@ import sys
 # gzip + base85 payloads, keyed by destination path
 FILES = {
     "pipeline.py": (
-        "ABzY8<;$aL0{^|e>sH&yx+waer>N;3Igz?;VH<LD+S!W`(#@JAuz<|VrWr=I%b>=VJS7`Kr*p=6i2V-"
+        "ABzY8!_A{=0{^|e>sH&yx+waer>N;3Igz?;VH<LD+S!W`(#@JAuz<|VrWr=I%b>=VJS7`Kr*p=6i2V-"
         "x_j!f=DCbGecd05>No7N_lG#5x#x9lW^4+hEMq^{Ebr9dlTpZ=uY`zft>F;v1NU~JCkqh<dD4EM?l1kBPiMRXjcM"
         "inv;k(!S@Auw_y*K-(`-ksEaMO+2Q9In|f7Aaq_TL>H9-"
         "oSn)17xmJuz1ci3WoknHR9O!2lOE&y#c^l7)yT3)qT;AMeC+KF#8>SY%?9rIRF|ZQNx`5$95**+S&YG)>Y=5sP9G"
@@ -437,7 +437,7 @@ FILES = {
         "O>4@H`vxnSx2%fKhW~+WGWiCguhko<oS=NDG;`=S1C-cL8m?Cwuh!RIA+tM#xk;<)Gtc?|0UXfS(fBa|00"
     ),
     "train_probe.py": (
-        "ABzY8<;$aL0{^XBX>;2~w*Agu(Lw4x0X9f2u`_QtVX9<XiZ$^zlE&`?hlPMdlSB*xG!`wR(SM(FZ+8O?3KZ?cs<H"
+        "ABzY8!_A{=0{^XBX>;2~w*Agu(Lw4x0X9f2u`_QtVX9<XiZ$^zlE&`?hlPMdlSB*xG!`wR(SM(FZ+8O?3KZ?cs<H"
         "_J-M8=7=PqbEj?=r4vnr3vTk#>!rc%5NlX#kkWt^qrf5k;fm-ARg;xZ58G)@=dG!IwuI?F!^_v*;&jsDbMkI5FIT"
         "uSjKyp?(XNG#(hl4-vv!%~Vhb9Eh;%VDo4#1rx4$=fO^<9-yDVIj*WPef@rb0aC&xF?>9-"
         "@`bW<}&;wW?8<@^3W4kaVYv`TA^vZ4)aK)aser?WC3FHJX?u(S$UTJE@!21r!tKfsVL=5DT=b1&!Gz9MucS<&OTx"
@@ -521,7 +521,7 @@ FILES = {
         ">00"
     ),
     "benchmark.py": (
-        "ABzY8<;$aL0{^vI>vG#jcK*+&=*3hbU<`s6k7sAOp{rzDo>fMc6<O=l7Dt6`5={~o2w>5mBraE}JVf3h?~zBzljJ"
+        "ABzY8!_A{=0{^vI>vG#jcK*+&=*3hbU<`s6k7sAOp{rzDo>fMc6<O=l7Dt6`5={~o2w>5mBraE}JVf3h?~zBzljJ"
         "+yjVmciGx4ZwiEMPAK7G!2t_{nwI&VZgTdsI^!<IaYg_LZbWGr6_7RKp1?=E;Qn9TX?hS_HW)_u*+hK|=6|C*o92"
         "f^h!6OxHrk!{#4iRa;Bo$)+OVupWuIN&*#A_oKP<M|0&C4q=ol<<J@IAEDblPs5=X_DkJ&v>fI1ULuroQv$1N77|"
         "eG2?3~Sejsv37Lm097WPLoXy1@Tdw0E6Cjw}$qvs1i<3|auhV&3XG?<oD&;iM=265X#1zI0B_YXIf}IU|XG11u3C"
@@ -602,7 +602,7 @@ FILES = {
         "%TU&8m*>vO(OZFAo@ug&QmdguQDJnWBQAu|8~"
     ),
     "tests/smoke_offline.py": (
-        "ABzY8<;$aL0{`uO>w4Qpmf(LrMJ>GF21t_-NlCsa&FsjMoM>9MHMWw@e2NAQ5=9ab2p|9`iR0Gy?L+K4%<p}Ld6a"
+        "ABzY8!_A{=0{`uO>w4Qpmf(LrMJ>GF21t_-NlCsa&FsjMoM>9MHMWw@e2NAQ5=9ab2p|9`iR0Gy?L+K4%<p}Ld6a"
         "#UJ(mJdxR9c3rMt7cnQ4mz3w1el&Z%=R!!SDUr_;a>rAXu~k!k8jp~z&KrD7T-"
         "BAZJwi56pM;EC9eB{em}NPKtxLs!7xMdZmqc+qVbM6Q=wcIU$~JP;yYW%DT9<-T^(MRYBlh=;P{Ri|?l-"
         "N+<85I=r6d@H<c6-yCEfj?P^KZu1~M9HeRaAUD>v$-"
@@ -995,24 +995,27 @@ next steps, in a FRESH Kaggle session (no model resident):
     import os; from kaggle_secrets import UserSecretsClient
     os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
 
-  1) train the probe on the TRAIN split (out-of-fold calibration,
-     ~25-45 min on 2x T4):
+  1) train the probe on the TRAIN split (out-of-fold calibration).
+     HEADLINE = multi-layer probe (~40-60 min on 2x T4):
+    !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" \
+        --layers 12,16,20,24 --fpr_limit 0.01 --n_splits 5 --notinject \
+        --pos_variants 3 --output probe_qwen_ml.joblib \
+        2>&1 | tee training.log
+     cheaper BASELINE/ABLATION = single layer 20 (~25-45 min):
     !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" --layer 20 \
         --fpr_limit 0.01 --n_splits 5 --notinject \
-        --output probe_qwen_layer20.joblib
+        --output probe_qwen_layer20.joblib 2>&1 | tee training.log
 
   2) evaluate + benchmark with the SAME probe layer(s) you trained.
      A mismatched --layers is refused by the probe fingerprint check
-     (that is F-03 working, not a bug):
-    !python evaluate_probe.py --probe probe_qwen_layer20.joblib --layer 20
-    !python evaluate_end_to_end.py --probe probe_qwen_layer20.joblib \
-        --layer 20 --l1_escalate 0.0 --dump_scores e2e_scores.csv
-    !python benchmark.py --probe probe_qwen_layer20.joblib --layer 20 \
+     (that is F-03 working, not a bug). Multi-layer artifact:
+    !python evaluate_probe.py --probe probe_qwen_ml.joblib --layers 12,16,20,24
+    !python evaluate_end_to_end.py --probe probe_qwen_ml.joblib \
+        --layers 12,16,20,24 --l1_escalate 0.0 --dump_scores e2e_scores.csv
+    !python benchmark.py --probe probe_qwen_ml.joblib --layers 12,16,20,24 \
         --per_dataset 250 --dump_scores bench_scores.csv
-
-  multi-layer variant: train with --layers 12,16,20,24 --output
-  probe_qwen_ml.joblib, then pass --layers 12,16,20,24 to EVERY
-  eval/benchmark command as well.
+     single-layer artifact: replace --layers 12,16,20,24 with --layer 20
+     and the artifact name in all three commands.
 """)
     return 0
 
