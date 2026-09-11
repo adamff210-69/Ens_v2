@@ -26,6 +26,7 @@ Kaggle example (v2 - recommended):
 """
 
 import argparse
+import os
 import random
 from typing import Dict, List, Optional, Tuple
 
@@ -288,7 +289,9 @@ def main() -> None:
                              "dropped when balancing (not recommended)")
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--load_in_4bit", action="store_true")
-    parser.add_argument("--hf_token", default=None, type=str)
+    parser.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"), type=str,
+                        help="HF token; falls back to the HF_TOKEN env var "
+                             "(Kaggle: set it from Add-ons -> Secrets)")
     args = parser.parse_args()
 
     probe_layers = ([int(x) for x in args.layers.split(",") if x.strip()]

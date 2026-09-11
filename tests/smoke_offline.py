@@ -1203,6 +1203,9 @@ class TestInstallerLocalEdits(unittest.TestCase):
             self.skipTest("verify.py not present")
         if os.environ.get("ENS_VERIFY_CHILD"):
             self.skipTest("nested installer run (recursion guard)")
+        if os.environ.get("ENS_FAST_SUITE"):
+            self.skipTest("ENS_FAST_SUITE set — subprocess installer tests "
+                          "run separately (pre-training gate stays snappy)")
         import tempfile
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name

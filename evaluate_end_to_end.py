@@ -30,6 +30,7 @@ Kaggle:
 
 import argparse
 import csv
+import os
 
 import numpy as np
 
@@ -44,7 +45,8 @@ def main() -> None:
     parser.add_argument("--layer", default=20, type=int)
     parser.add_argument("--probe_threshold", default=None, type=float,
                         help="Override probe decision threshold (default: artifact value)")
-    parser.add_argument("--hf_token", default=None, type=str)
+    parser.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"), type=str,
+                        help="HF token; falls back to the HF_TOKEN env var")
     parser.add_argument("--load_in_4bit", action="store_true")
     parser.add_argument("--l1_block", default=0.85, type=float,
                         help="L1 hard-block threshold (matches pipeline default)")

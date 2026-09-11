@@ -21,13 +21,14 @@ Internet). Pin the commit SHA so a future you (or a reviewer) gets exactly
 the audited code:
 
     %cd /kaggle/working
-    !git clone https://github.com/adamff210-69/Ens_v2.git
+    !rm -rf Ens_v2                       # start CLEAN: an existing dir keeps
+    !git clone -q https://github.com/adamff210-69/Ens_v2.git
     %cd Ens_v2
-    !git checkout b7f36c2f36df0adb87d4b2251f140e255aa3451c   # audited artifact
-                                                            # (audit fixes
-                                                            # F-01..F-08, F-11,
-                                                            # F-12, D-1, R5 incl.)
+    !git checkout -q b7f36c2f36df0adb87d4b2251f140e255aa3451c   # audited artifact
+    !git status --porcelain              # MUST print nothing (no stale files)
     !python verify.py
+    # confirm you import THIS copy, not a stale one earlier on sys.path:
+    !python -c "import pipeline; print(pipeline.__version__, pipeline.__file__)"
 
 Which performs two distinct safety checks **before writing anything**:
 
@@ -42,7 +43,8 @@ Which performs two distinct safety checks **before writing anything**:
 Only if both checks pass does it extract (re-hashing each file from disk) and
 run the 67-test offline suite. Exit codes: `0` ok · `2` corrupt bundle ·
 `3` post-write mismatch · `4` local conflict (nothing written) · `64` bad
-CLI usage.
+CLI usage. For a snappy pre-training gate, `ENS_FAST_SUITE=1 python verify.py`
+skips the three subprocess-based installer tests (runs 64).
 
 If `git clone` is blocked by Kaggle's proxy, fall back to Route B.
 

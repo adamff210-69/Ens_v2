@@ -183,18 +183,29 @@ confirm the import (catches a stale copy from an earlier session):
 
 next steps, in a FRESH Kaggle session (no model resident):
 
-  train the v2 probe:
-    !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" \\
-        --layers 12,16,20,24 --fpr_limit 0.01 --n_splits 5 \\
-        --output probe_qwen_ml.joblib \\
-        --datasets "deepset/prompt-injections:train:text:label:1,jackhhao/jailbreak-classification:train:prompt:type:jailbreak" \\
-        --notinject --pos_variants 3
+  export your HF token first (Add-ons -> Secrets) to avoid Hub rate limits;
+  every CLI below falls back to the HF_TOKEN env var automatically:
+    import os; from kaggle_secrets import UserSecretsClient
+    os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
 
-  then benchmark the stack (same session, one model load):
-    !python benchmark.py --model "Qwen/Qwen2.5-7B-Instruct" \\
-        --probe probe_qwen_ml.joblib --layers 12,16,20,24 \\
-        --l1_models "ProtectAI/deberta-v3-base-prompt-injection-v2,leolee99/PIGuard" \\
+  1) train the probe on the TRAIN split (out-of-fold calibration,
+     ~25-45 min on 2x T4):
+    !python train_probe.py --model "Qwen/Qwen2.5-7B-Instruct" --layer 20 \\
+        --fpr_limit 0.01 --n_splits 5 --notinject \\
+        --output probe_qwen_layer20.joblib
+
+  2) evaluate + benchmark with the SAME probe layer(s) you trained.
+     A mismatched --layers is refused by the probe fingerprint check
+     (that is F-03 working, not a bug):
+    !python evaluate_probe.py --probe probe_qwen_layer20.joblib --layer 20
+    !python evaluate_end_to_end.py --probe probe_qwen_layer20.joblib \\
+        --layer 20 --l1_escalate 0.0 --dump_scores e2e_scores.csv
+    !python benchmark.py --probe probe_qwen_layer20.joblib --layer 20 \\
         --per_dataset 250 --dump_scores bench_scores.csv
+
+  multi-layer variant: train with --layers 12,16,20,24 --output
+  probe_qwen_ml.joblib, then pass --layers 12,16,20,24 to EVERY
+  eval/benchmark command as well.
 """)
     return 0
 

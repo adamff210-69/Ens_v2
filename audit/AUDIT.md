@@ -364,3 +364,34 @@ limitations (evaluator file and README not shipped), while their underlying
 policy tests still run. `audit/repro_findings.py` exit 0 (F-01..F-04
 FIXED). Remaining open: Fix 11's Kaggle training run, real-hardware
 validation (`TEST_RESULTS.md` §6), F-10 generation timeouts, F-13/F-14.
+
+## Addendum — 2026-09-11 (first Kaggle hardware run: operational fixes)
+
+The first real-hardware run validated F-11 verify-then-write on Kaggle,
+the 67-test suite on T4, and D-1 pinning in the live HTTP path
+(`/resolve/<40-hex-sha>/`). The run review surfaced four operational
+hazards, fixed in commit `<R6-COMMIT>`:
+
+1. **Stale-directory clone.** The run cloned over an existing
+   `/kaggle/working/Ens_v2`, leaving untracked leftovers. INSTALL.md Route A
+   and `kaggle_session_r5.py` K1 now mandate `rm -rf`, a clean clone,
+   `git status --porcelain` (must be empty), and an import-origin check
+   (`python -c "import pipeline; print(pipeline.__version__, pipeline.__file__)"`).
+2. **Layer-alignment trap.** `verify.py`'s printed next-steps suggested a
+   multi-layer benchmark against whatever probe was trained — the F-03
+   fingerprint correctly refuses that mismatch. The printed guidance now
+   leads with the single-layer flow matching the README quick start and
+   states the train/eval layer-match rule explicitly; multi-layer is offered
+   as a variant with the matching flags.
+3. **Unauthenticated Hub downloads.** All four CLIs now fall back to the
+   `HF_TOKEN` environment variable (Kaggle Add-ons → Secrets), documented
+   in the installer output and the session script.
+4. **Slow pre-training gate.** The three subprocess-based installer tests
+   can be skipped with `ENS_FAST_SUITE=1` (64 tests, ~0.1s vs ~30s on T4);
+   the full 67-test gate remains the default.
+
+These are operational corrections only — no detection logic, threshold, or
+fingerprint semantics changed. The pending items from the run review are
+unchanged: training completion, OOF AUC/threshold evidence, per-GPU
+residency + parameter dtype on hardware, and the post-F-04 end-to-end
+recompute.

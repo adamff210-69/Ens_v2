@@ -31,6 +31,7 @@ Usage (Kaggle):
 
 import argparse
 import csv
+import os
 from typing import List
 
 import numpy as np
@@ -184,7 +185,8 @@ def main() -> None:
     ap.add_argument("--datasets", default="deepset_test,notinject_benign,jailbreak_prompts",
                     type=str)
     ap.add_argument("--dump_scores", default=None, type=str)
-    ap.add_argument("--hf_token", default=None, type=str)
+    ap.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"), type=str,
+                    help="HF token; falls back to the HF_TOKEN env var")
     ap.add_argument("--load_in_4bit", action="store_true")
     args = ap.parse_args()
 

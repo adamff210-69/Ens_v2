@@ -16,8 +16,7 @@ Kaggle example:
 """
 
 import argparse
-
-from datasets import load_dataset
+import os
 
 from pipeline import (DATASET_REVISIONS, HiddenStateProbeLayer, VRAMManager,
                       pinned_revision)
@@ -30,7 +29,8 @@ def main() -> None:
                         help="Trained probe artifact (train split ONLY, never test)")
     parser.add_argument("--layer", default=20, type=int)
     parser.add_argument("--pooling", default="last", type=str)
-    parser.add_argument("--hf_token", default=None, type=str)
+    parser.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"), type=str,
+                        help="HF token; falls back to the HF_TOKEN env var")
     parser.add_argument("--load_in_4bit", action="store_true")
     parser.add_argument("--max_examples", default=250, type=int)
     args = parser.parse_args()
@@ -47,8 +47,11 @@ def main() -> None:
     print(f"Artifact threshold: {probe.threshold:.4f} (FPR budget {probe.fpr_budget:.2%})")
 
     # ------------------------------------------------------------------
-    # Held-out evaluation set: TEST split only — untouched during training
+    # Held-out evaluation set: TEST split only — untouched during training.
+    # Heavy dataset import stays in the CLI execution path (audit review §3).
     # ------------------------------------------------------------------
+    from datasets import load_dataset
+
     dataset = load_dataset(
         "deepset/prompt-injections",
         revision=pinned_revision(DATASET_REVISIONS, "deepset/prompt-injections"))
