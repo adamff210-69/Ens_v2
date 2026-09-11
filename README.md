@@ -51,7 +51,24 @@ python evaluate_probe.py --model "Qwen/Qwen2.5-7B-Instruct" \
   the probe of 38/60 held-out injections — see “Gate policy” below before raising it.
 - Probe `load()` raises on model/layer fingerprint conflict — garbage probes can't silently disable L2.
 - The same `<untrusted_context>` delimiters are used in augmentation, L1/L2 scoring and generation, keeping train/inference distributions aligned.
-
+- **Known residual risk — prefix probe (F-07).** Layer 2 hashes only the first
+  1024 tokens of an input. An adversarial instruction placed after a long
+  benign prefix sits outside the probe's window and is invisible to L2 (L1's
+  chunked scoring still applies, and the L3 output audit is unaffected). This
+  is a documented gap, not a configuration error, and is deliberately **not**
+  patched by raising `max_length` — that would invalidate the trained probe's
+  fingerprint and force a full retrain + recalibration (see the F-09 runbook
+  below). Mitigations: keep L1 dual-key enabled and the published thresholds;
+  a long-window probe variant is a roadmap item.
+- **Pinned supply chain (D-1).** Every Hub artifact this stack loads is pinned
+  to an exact commit revision (`MODEL_REVISIONS` / `DATASET_REVISIONS` in
+  `pipeline.py`, verified against the HF API on 2026-09-11), so an upstream
+  force-push cannot silently change what a deployment loads.
+- **Probe required by default (D-2).** `InjectionDetectionPipeline(...)` raises
+  at construction when no trained probe is attached (`require_probe=True`, the
+  default). Evaluation/demo code may opt into degraded L1+L3-only operation
+  with `require_probe=False`, which logs a warning at construction; production
+  serving must keep the default.
 
 ## Validation performed (Sept 2026)
 
@@ -75,6 +92,14 @@ Held-out `deepset/prompt-injections` test split, L1 = ProtectAI DeBERTa v2, prob
 |---|---|---|---|
 | `l1_escalate_threshold=0.30` (legacy) | 1 / 60 | 0.367 (22/60) | 0.000 |
 | `l1_escalate_threshold=0.0` (always-on, default) | 95 / 116 rows scored (L1 hard-blocks 21, those skip L2) | **0.833 (50/60)** at artifact thr 0.9868 | **0.000 (0/56)** |
+
+> **Attribution caveat (post-F-04).** Since the F-04 refactor, L1 hard-blocks go
+> through the shared predicate `l1_hard_block(...)`: on single-window inputs,
+> scores in `0.85 ≤ p1 < 0.95` are no longer hard-blocked at L1 alone — they are
+> routed to L2 for dual-key confirmation, so such rows now count as
+> L2/dual-key attributions instead of L1 catches. The rows above were measured
+> before that change; re-run `evaluate_end_to_end.py` / `benchmark.py` before
+> publishing updated gate numbers.
 
 Fixing the gate took end-to-end recall from 0.367 to 0.833 with zero false
 positives: L2 now contributes 29+ catches that L1 misses (union 50 vs 21 from
@@ -131,6 +156,31 @@ Policy B  always-on L2, L2 thr=0.9612
 
 Same signature as the 7B run: under the legacy gate the probe contributes nothing;
 under always-on it adds real recall at zero measured FPR.
+
+## Recalibrating the probe threshold (F-09 runbook)
+
+The **0.90** threshold baked into the currently deployed
+`probe_qwen_layer20.joblib` was picked on the *held-out test split* (see the
+test-set-tuning caveat above). The artifact is therefore **test-adjusted**
+until retrained. The supported recalibration path is `train_probe.py`, which
+calibrates on out-of-fold (OOF) predictions of the *train* split instead:
+
+1. Run on Kaggle (2× T4): `python train_probe.py` (defaults: `--model
+   Qwen/Qwen2.5-7B-Instruct --layer 20 --fpr_limit 0.01 --n_splits 5`).
+   Dataset specs load `deepset/prompt-injections` plus hard-negative corpora
+   (`jackhhao/jailbreak-classification`, `rubend18/ChatGPT-Jailbreak-Prompts`)
+   and `--notinject` benigns — all at pinned dataset revisions (D-1).
+2. Training runs stratified grouped CV and picks the threshold under the FPR
+   budget on OOF predictions (`HiddenStateProbeLayer.train`), so the baked-in
+   threshold never touches the test split.
+3. The artifact is written with a model + probe-layer fingerprint;
+   `load()` refuses artifacts from a different base model or layer.
+4. After retraining, publish the new artifact and re-run the gate-table
+   evaluators (`evaluate_end_to_end.py`, `benchmark.py`) before citing
+   numbers — including the gate-table caveat above.
+
+Until that re-run happens, treat the shipped 0.90 as *test-adjusted and good
+enough for demo*, not as a production-calibrated operating point.
 
 ## Troubleshooting: CUDA OOM on Kaggle
 

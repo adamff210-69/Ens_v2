@@ -29,7 +29,8 @@ import argparse
 import random
 from typing import Dict, List, Optional, Tuple
 
-from pipeline import HiddenStateProbeLayer, VRAMManager, augment_injection_data
+from pipeline import (DATASET_REVISIONS, HiddenStateProbeLayer, VRAMManager,
+                      augment_injection_data, pinned_revision)
 
 # Default extra corpora (verified available on the HF Hub, ungated)
 DEFAULT_DATASETS = [
@@ -62,7 +63,8 @@ def load_spec(spec: str, max_rows: Optional[int] = None) -> Tuple[List[str], Lis
             f"'hf_path:split:text_col:label_col:positive_labels'")
     path, split, text_col, label_col, pos_labels = parts[0], parts[1], parts[2], parts[3], parts[4]
 
-    ds = load_dataset(path, split=split)
+    ds = load_dataset(path, split=split,
+                      revision=pinned_revision(DATASET_REVISIONS, path))
 
     # Fail loud on a typo'd column. Silently treating a missing label column as
     # "not positive" can turn an entire attack corpus into negatives, which is
@@ -109,9 +111,11 @@ def load_notinject(max_rows: Optional[int] = None,
     """
     from datasets import get_dataset_split_names, load_dataset
 
+    _nj_rev = pinned_revision(DATASET_REVISIONS, "leolee99/NotInject")
     try:
-        splits = [s for s in get_dataset_split_names("leolee99/NotInject", "default")
-                  if s.lower().startswith("notinject")]
+        splits = [s for s in get_dataset_split_names(
+            "leolee99/NotInject", "default", revision=_nj_rev)
+            if s.lower().startswith("notinject")]
     except Exception:
         splits = ["NotInject_one", "NotInject_two", "NotInject_three"]
 
@@ -119,7 +123,8 @@ def load_notinject(max_rows: Optional[int] = None,
     labels: List[int] = []
     for split in splits:
         try:
-            ds = load_dataset("leolee99/NotInject", "default", split=split)
+            ds = load_dataset("leolee99/NotInject", "default", split=split,
+                              revision=_nj_rev)
             for row in ds:
                 txt = row.get("prompt") or row.get("text") or ""
                 if not str(txt).strip():

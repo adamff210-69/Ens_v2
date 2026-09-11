@@ -101,8 +101,13 @@ pipe = InjectionDetectionPipeline(
     hf_token=HF_TOKEN,
     probe_layer=20,                       # Qwen2.5-7B has 28 layers; 20 = mid-late
     probe_path=PROBE_PATH if os.path.exists(PROBE_PATH) else None,
+    # Demo notebook: boot in the documented L1+L3-only degraded mode if the
+    # artifact is missing. PRODUCTION SERVING must keep the default
+    # require_probe=True, which fails loudly at construction instead (D-2).
+    require_probe=False,
     # NOTE: the artifact carries its own calibrated threshold (0.90 in the
-    # deployed probe); pass probe_threshold=... only to override at runtime.
+    # deployed probe — test-set tuned; see F-09 retrain note in README);
+    # pass probe_threshold=... only to override at runtime.
     load_in_4bit=False,                   # True if fp16 generation OOMs
     judge_model_name=None,                # self-judge reuses the 7B (VRAM-safe)
     l1_block_threshold=0.85,

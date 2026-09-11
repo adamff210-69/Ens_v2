@@ -35,21 +35,26 @@ import csv
 import numpy as np
 from datasets import load_dataset
 
-from pipeline import (InjectionDetectionPipeline, VRAMManager,
-                      l1_hard_block)
+from pipeline import (DATASET_REVISIONS, InjectionDetectionPipeline,
+                      VRAMManager, l1_hard_block, pinned_revision)
 
 
 # --------------------------------------------------------------------------
 # Dataset registry: (name, loader)
 # --------------------------------------------------------------------------
 def _load_deepset_test(cap):
-    ds = load_dataset("deepset/prompt-injections", split="test")
+    ds = load_dataset(
+        "deepset/prompt-injections", split="test",
+        revision=pinned_revision(DATASET_REVISIONS, "deepset/prompt-injections"))
     ds = ds.select(range(min(cap, len(ds))))
     return ([r["text"] for r in ds], np.array([int(r["label"]) for r in ds]))
 
 
 def _load_jailbreak_classification_test(cap):
-    ds = load_dataset("jackhhao/jailbreak-classification", split="test")
+    ds = load_dataset(
+        "jackhhao/jailbreak-classification", split="test",
+        revision=pinned_revision(DATASET_REVISIONS,
+                                 "jackhhao/jailbreak-classification"))
     ds = ds.select(range(min(cap, len(ds))))
     texts = [r["prompt"] for r in ds]
     # This corpus labels via "type" ("jailbreak"/"benign"); there is no "label"
@@ -66,16 +71,19 @@ def _load_notinject(cap):
     each), columns prompt/word_list/category. All three splits are concatenated.
     """
     from datasets import get_dataset_split_names
+    _nj_rev = pinned_revision(DATASET_REVISIONS, "leolee99/NotInject")
     try:
-        splits = [s for s in get_dataset_split_names("leolee99/NotInject", "default")
-                  if s.lower().startswith("notinject")]
+        splits = [s for s in get_dataset_split_names(
+            "leolee99/NotInject", "default", revision=_nj_rev)
+            if s.lower().startswith("notinject")]
     except Exception:
         splits = ["NotInject_one", "NotInject_two", "NotInject_three"]
 
     texts, per_split = [], {}
     for split in splits:
         try:
-            ds = load_dataset("leolee99/NotInject", "default", split=split)
+            ds = load_dataset("leolee99/NotInject", "default", split=split,
+                              revision=_nj_rev)
             texts += [str(r.get("prompt") or r.get("text") or "") for r in ds]
             per_split[split] = len(ds)
         except Exception as e:  # noqa: BLE001
@@ -91,7 +99,10 @@ def _load_notinject(cap):
 
 def _load_ttp(cap):
     """rubend18 ChatGPT-Jailbreak-Prompts: every row is a POSITIVE by construction."""
-    ds = load_dataset("rubend18/ChatGPT-Jailbreak-Prompts", split="train")
+    ds = load_dataset(
+        "rubend18/ChatGPT-Jailbreak-Prompts", split="train",
+        revision=pinned_revision(DATASET_REVISIONS,
+                                 "rubend18/ChatGPT-Jailbreak-Prompts"))
     ds = ds.select(range(min(cap, len(ds))))
     texts = []
     for r in ds:

@@ -14,6 +14,7 @@ Qwen2.5-7B per README.
 """
 
 import logging
+import re
 import sys
 import types
 import unittest
@@ -904,6 +905,85 @@ class TestAuditSecurityFixes(unittest.TestCase):
                           os.path.join("tests", "smoke_offline.py")):
                 self.assertFalse((Path(d) / other).exists(),
                                  f"{other} written despite mismatch")
+
+
+class TestBatchBDecisions(unittest.TestCase):
+    """Regression locks for the Batch B owner decisions (D-1, D-2/F-08, F-07)."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_d2_require_probe_policy(self):
+        """D-2/F-08: serving stacks fail loudly without a probe; degraded
+        mode is opt-in only."""
+        with self.assertRaises(RuntimeError) as ctx:
+            P._check_probe_requirement(False, require_probe=True)
+        self.assertIn("require_probe=True", str(ctx.exception))
+        # Degraded-mode opt-in and attached-probe cases must not raise.
+        P._check_probe_requirement(False, require_probe=False)
+        P._check_probe_requirement(True, require_probe=True)
+        P._check_probe_requirement(True, require_probe=False)
+
+    def test_d2_pipeline_defaults_to_require_probe(self):
+        """The serving constructor must default require_probe=True."""
+        import inspect
+        sig = inspect.signature(P.InjectionDetectionPipeline.__init__)
+        self.assertIn("require_probe", sig.parameters)
+        self.assertTrue(sig.parameters["require_probe"].default)
+        # Drift alarm: __init__ must actually enforce the policy.
+        src = (self.ROOT / "pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("_check_probe_requirement(self.layer2.probe is not None",
+                      src)
+
+    def test_d1_registries_are_pinned_to_full_shas(self):
+        """D-1: every known hub artifact has a 40-hex-char revision pin."""
+        sha = re.compile(r"^[0-9a-f]{40}$")
+        for name in ("Qwen/Qwen2.5-7B-Instruct",
+                     "ProtectAI/deberta-v3-base-prompt-injection-v2",
+                     "leolee99/PIGuard"):
+            self.assertIn(name, P.MODEL_REVISIONS)
+            self.assertRegex(P.MODEL_REVISIONS[name], sha)
+        for name in ("deepset/prompt-injections",
+                     "jackhhao/jailbreak-classification",
+                     "leolee99/NotInject",
+                     "rubend18/ChatGPT-Jailbreak-Prompts"):
+            self.assertIn(name, P.DATASET_REVISIONS)
+            self.assertRegex(P.DATASET_REVISIONS[name], sha)
+        # Lookup is case-insensitive on the hub id; unknown -> None (float).
+        self.assertEqual(
+            P.pinned_revision(P.MODEL_REVISIONS,
+                              "protectai/DeBERTa-v3-base-prompt-injection-v2"),
+            P.MODEL_REVISIONS["ProtectAI/deberta-v3-base-prompt-injection-v2"])
+        self.assertIsNone(P.pinned_revision(P.MODEL_REVISIONS, "unknown/model"))
+
+    def test_d1_loaders_thread_revisions(self):
+        """D-1 drift alarm: every hub load site passes a revision pin."""
+        pipe_src = (self.ROOT / "pipeline.py").read_text(encoding="utf-8")
+        # L1 tokenizer+model and L2 tokenizer+model: >= 4 revision= sites.
+        self.assertGreaterEqual(pipe_src.count("revision=revision"), 4)
+        # Bundled loaders (always present in the shipped bundle).
+        for fname in ("train_probe.py", "benchmark.py"):
+            src = (self.ROOT / fname).read_text(encoding="utf-8")
+            self.assertIn("pinned_revision(DATASET_REVISIONS", src,
+                          f"{fname} must load datasets at pinned revisions")
+        # Repo-only loaders: skipped when running from the shipped bundle.
+        for fname in ("evaluate_probe.py", "evaluate_end_to_end.py"):
+            p = self.ROOT / fname
+            if not p.exists():
+                continue
+            src = p.read_text(encoding="utf-8")
+            self.assertIn("pinned_revision(DATASET_REVISIONS", src,
+                          f"{fname} must load datasets at pinned revisions")
+
+    def test_f07_readme_documents_prefix_probe_gap(self):
+        """F-07: the L2 1024-token prefix-probe residual risk stays documented."""
+        readme = self.ROOT / "README.md"
+        if not readme.exists():
+            self.skipTest("README.md not shipped in the verify bundle")
+        text = readme.read_text(encoding="utf-8")
+        self.assertIn("prefix probe", text.lower())
+        self.assertIn("1024", text)
+        self.assertIn("require_probe", text)  # D-2 documented alongside
+        self.assertIn("MODEL_REVISIONS", text)  # D-1 documented alongside
 
 
 if __name__ == "__main__":

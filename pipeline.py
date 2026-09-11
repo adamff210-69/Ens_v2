@@ -71,6 +71,39 @@ INJECTION_SIGNATURES = frozenset({
     "injection", "prompt_injection", "jailbreak", "unsafe", "label_1", "1",
 })
 
+# ---------------------------------------------------------------------------
+# Supply-chain pins (audit D-1)
+# ---------------------------------------------------------------------------
+# Public HF identifiers (names) resolve to whatever HEAD points at — an
+# upstream force-push would silently change the artifact a deployment loads.
+# Every artifact this stack pulls from the Hub is pinned to the commit SHA
+# it was evaluated with (verified against the HF API on 2026-09-11).
+MODEL_REVISIONS = {
+    "Qwen/Qwen2.5-7B-Instruct":
+        "a09a35458c702b33eeacc393d103063234e8bc28",
+    "ProtectAI/deberta-v3-base-prompt-injection-v2":
+        "90c9989b1a342275dd0d1a95aad283c04e075671",
+    "leolee99/PIGuard":
+        "dd78b24e330193a22d2293ac66922dd4f982f563",
+}
+DATASET_REVISIONS = {
+    "deepset/prompt-injections":
+        "4f61ecb038e9c3fb77e21034b22511b523772cdd",
+    "jackhhao/jailbreak-classification":
+        "2f2ceeb39658696fd3f462403562b6eea5306287",
+    "leolee99/NotInject":
+        "847ae76cf8fea5ed325429e569ae8cfef022d2e0",
+    "rubend18/ChatGPT-Jailbreak-Prompts":
+        "b93e4982f8f8ad2d82c6d35e3c00d161844ad70a",
+}
+
+def pinned_revision(registry: Dict[str, str], name: str) -> Optional[str]:
+    """Revision pin for a Hub artifact (case-insensitive); None -> upstream HEAD."""
+    for key, rev in registry.items():
+        if key.lower() == name.lower():
+            return rev
+    return None
+
 
 # ===========================================================================
 # VRAM Manager — explicit device placement & memory safety (2x T4 aware)
@@ -264,8 +297,11 @@ class TextClassifierLayer:
 
     def _load_one(self, name: str) -> Dict[str, Any]:
         """Load a single guard model + tokenizer."""
-        tokenizer = AutoTokenizer.from_pretrained(name)
-        model = AutoModelForSequenceClassification.from_pretrained(name)
+        revision = pinned_revision(MODEL_REVISIONS, name)
+        tokenizer = AutoTokenizer.from_pretrained(
+            name, trust_remote_code=True, revision=revision)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            name, trust_remote_code=True, revision=revision)
         id2label = {int(k): str(v) for k, v in model.config.id2label.items()}
         labels = self._resolve_injection_labels(id2label)
         clf = hf_pipeline(
@@ -501,8 +537,10 @@ class HiddenStateProbeLayer:
         return self.threshold
 
     def _init_base_llm(self, load_in_4bit: bool) -> None:
+        revision = pinned_revision(MODEL_REVISIONS, self.model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, token=self.hf_token, trust_remote_code=True
+            self.model_name, token=self.hf_token, trust_remote_code=True,
+            revision=revision,
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -534,6 +572,7 @@ class HiddenStateProbeLayer:
             low_cpu_mem_usage=True,
             token=self.hf_token,
             trust_remote_code=True,
+            revision=revision,
         )
         self.model.eval()
 
@@ -1076,6 +1115,23 @@ def _validate_thresholds(
         )
 
 
+def _check_probe_requirement(probe_attached: bool, require_probe: bool) -> None:
+    """Enforce the missing-probe policy at construction (audit D-2 / F-08).
+
+    A serving stack must never silently run without Layer 2: with
+    ``require_probe=True`` (the default) construction fails loudly instead of
+    degrading to L1+L3. Evaluation/demo callers opt into the documented
+    degraded mode with ``require_probe=False``.
+    """
+    if require_probe and not probe_attached:
+        raise RuntimeError(
+            "require_probe=True but no trained L2 probe is attached. Train one "
+            "with train_probe.py and pass probe_path=..., or pass "
+            "require_probe=False to accept degraded L1+L3-only operation "
+            "(evaluation/demo use only — never production serving)."
+        )
+
+
 # ===========================================================================
 # Master pipeline orchestrator
 # ===========================================================================
@@ -1097,7 +1153,8 @@ class InjectionDetectionPipeline:
         l1_models: Optional[List[str]] = None,
         probe_layers: Optional[List[int]] = None,
         l1_dual_key: bool = True,
-    ):
+        require_probe: bool = True,
+    ) -> None:
         self.fail_closed = fail_closed
         self.l1_block_threshold = l1_block_threshold
         # 0.0 => L2 runs on EVERY input L1 did not hard-block ("always-on").
@@ -1136,6 +1193,18 @@ class InjectionDetectionPipeline:
             # Fail-fast: a wrong/mismatched artifact must never silently
             # disable Layer 2 (load() performs model + layer fingerprint checks)
             self.layer2.load(probe_path)
+
+        # Missing-probe policy (audit D-2 / F-08): a serving stack must not
+        # silently run without L2. require_probe=True (default) raises at
+        # construction; eval/demo code may opt into the degraded mode.
+        self.require_probe = require_probe
+        _check_probe_requirement(self.layer2.probe is not None, require_probe)
+        if self.layer2.probe is None:   # only reachable with require_probe=False
+            logger.warning(
+                "Pipeline constructed WITHOUT an L2 probe (require_probe=False): "
+                "input gating degrades to L1-only; the L3 output audit remains "
+                "active. This mode is for evaluation/demo, not serving."
+            )
 
         # Layer 3: reuses the SAME model instance — no second judge to OOM.
         if judge_model_name and judge_model_name != llm_model_name:

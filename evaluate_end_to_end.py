@@ -34,7 +34,8 @@ import csv
 import numpy as np
 from datasets import load_dataset
 
-from pipeline import InjectionDetectionPipeline, VRAMManager, l1_hard_block
+from pipeline import (DATASET_REVISIONS, InjectionDetectionPipeline,
+                      VRAMManager, l1_hard_block, pinned_revision)
 
 
 def main() -> None:
@@ -74,7 +75,10 @@ def main() -> None:
     print(f"L1 block >= {args.l1_block}")
 
     # ------------------------------------------------------------------
-    test_split = load_dataset("deepset/prompt-injections")["test"]
+    test_split = load_dataset(
+        "deepset/prompt-injections",
+        revision=pinned_revision(DATASET_REVISIONS,
+                                 "deepset/prompt-injections"))["test"]
     texts = [ex["text"] for ex in test_split][: args.max_examples]
     y = np.array([int(ex["label"]) for ex in test_split])[: args.max_examples]
     if not texts:

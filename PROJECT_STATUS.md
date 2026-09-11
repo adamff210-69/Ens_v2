@@ -139,3 +139,28 @@ end-to-end recall from 0.367 → 0.90 with ~2% FPR.
    row; thresholds 0.50–0.95 all showed identical FPR because only one benign row scored >0.5.
 4. **Fail-closed + fingerprint checks pay off**: a mismatched probe raises at load instead of
    silently degrading security.
+
+---
+
+## 8. Audit & hardening rounds (Sept 2026, post-delivery)
+
+An independent audit (`audit/AUDIT.md`) followed by four fix rounds landed on
+branch `arena/01a08bcc-ens-v2`:
+
+| Round | Findings | Status |
+|---|---|---|
+| F-01..F-04 | fail-closed dual-key resolution, L1 total-failure raise, probe fingerprint (`max_length`), shared L1 hard-block predicate | FIXED + regression-locked |
+| Batch A (F-05, F-06, F-11, F-12) | phantom benchmark row, `train()` docstring, verify-then-write installer, threshold validation | FIXED + regression-locked |
+| Batch B (D-2/F-08, F-07, D-1) | `require_probe=True` default (loud failure w/o probe), prefix-probe gap documented in README, HF revision pins for all models/datasets | FIXED + regression-locked |
+| Batch C (offline parts) | F-09 recalibration runbook in README, gate-table attribution caveat, hardware checklist reference | DOCUMENTED |
+
+Still open:
+- **F-09 training run**: the deployed `probe_qwen_layer20.joblib` threshold
+  (0.90) is test-set tuned. Recalibrate on Kaggle per README "Recalibrating
+  the probe threshold (F-09 runbook)" — `train_probe.py` OOF calibration is
+  the supported path.
+- **Real-hardware validation**: no GPU in the audit sandbox; execute the
+  checklist in `audit/TEST_RESULTS.md` §6 (items 1–5: dtype/quant on T4,
+  end-to-end recall, fingerprint negative test) on Kaggle 2×T4.
+- **F-10**: generation has no timeout/watchdog (documented, not fixed).
+- **F-13 / F-14**: label allowlist + NaN guard remain deferred by owner decision.

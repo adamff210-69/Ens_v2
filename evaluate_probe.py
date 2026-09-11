@@ -19,7 +19,8 @@ import argparse
 
 from datasets import load_dataset
 
-from pipeline import HiddenStateProbeLayer, VRAMManager
+from pipeline import (DATASET_REVISIONS, HiddenStateProbeLayer, VRAMManager,
+                      pinned_revision)
 
 
 def main() -> None:
@@ -48,7 +49,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Held-out evaluation set: TEST split only — untouched during training
     # ------------------------------------------------------------------
-    dataset = load_dataset("deepset/prompt-injections")
+    dataset = load_dataset(
+        "deepset/prompt-injections",
+        revision=pinned_revision(DATASET_REVISIONS, "deepset/prompt-injections"))
     test_split = dataset["test"]
     texts = [ex["text"] for ex in test_split][: args.max_examples]
     labels = [int(ex["label"]) for ex in test_split][: args.max_examples]

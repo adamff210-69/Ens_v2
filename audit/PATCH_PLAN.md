@@ -1,5 +1,28 @@
 # PATCH_PLAN.md — Prioritized minimal fixes
 
+> **Status 2026-09-11 (Batch B + Batch C offline parts):** Fixes 8 (D-2/F-08),
+> 9 (F-07) and 12 (D-1) are IMPLEMENTED and regression-locked
+> (`tests/smoke_offline.py::TestBatchBDecisions`, 5 tests; suite 48/48 OK):
+> `InjectionDetectionPipeline.__init__` gained `require_probe=True` (default)
+> which raises `RuntimeError` at construction when no probe is attached —
+> serving stacks can no longer silently degrade to L1+L3; the Kaggle demo
+> notebook opts into the documented degraded mode with `require_probe=False`.
+> F-07's prefix-probe gap is documented as a known residual risk in
+> README "Security posture" (no `max_length` change — that would invalidate
+> the probe fingerprint). D-1: `MODEL_REVISIONS` / `DATASET_REVISIONS` in
+> `pipeline.py` pin every Hub artifact to the commit SHA it was evaluated
+> with (verified against the HF API on 2026-09-11), threaded through L1/L2
+> `from_pretrained` and every `load_dataset`/`get_dataset_split_names` call
+> site (`train_probe.py`, `evaluate_probe.py`, `evaluate_end_to_end.py`,
+> `benchmark.py`). Batch C offline parts: README gained the F-09
+> recalibration runbook (OOF calibration via `train_probe.py` is the
+> correct path; the deployed 0.90 artifact is test-adjusted until retrained)
+> and the post-F-04 gate-table attribution caveat (single-chunk
+> `0.85 ≤ p1 < 0.95` rows now attribute to L2/dual-key; re-run evaluators
+> before publishing). `PROJECT_STATUS.md` §8 references the real-hardware
+> validation checklist in `TEST_RESULTS.md` §6. Remaining open: Fix 11's
+> training-run part (needs Kaggle T4) and F-10 generation timeouts.
+>
 > **Status 2026-09-10 (F-04 long-term hardening):** per reviewer sign-off on
 > P1, the F-04 fix was strengthened from source-parity to a shared predicate:
 > `pipeline.l1_unambiguous()` / `pipeline.l1_hard_block()` are now the single
